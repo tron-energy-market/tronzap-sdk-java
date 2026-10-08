@@ -1,7 +1,6 @@
 package com.tronzap.sdk;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tronzap.sdk.model.AmlDirection;
@@ -167,10 +166,10 @@ class RequestWireTest {
     void nonAsciiValuesAreSignedAsUtf8() throws Exception {
         try (TestServer server = TestServer.start().replyOk("{}")) {
             server.client().createEnergyTransaction(EnergyTransactionRequest.builder("TAddress", 65000)
-                    .externalId("замовлення-№1").build());
+                    .externalId("pedido-año-订单-😀").build());
 
             TestServer.Received request = server.onlyRequest();
-            assertTrue(request.bodyText().contains("замовлення-№1"));
+            assertEquals("pedido-año-订单-😀", JSON.readTree(request.body()).path("external_id").asText());
             assertEquals(sha256Hex(request.body(), TestServer.SECRET), request.header("X-Signature"));
         }
     }
