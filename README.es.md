@@ -68,7 +68,7 @@ public class QuickStart {
                     EstimateEnergyRequest.of("TSenderAddress", "TRecipientAddress"));
 
             Transaction tx = client.createEnergyTransaction(
-                    EnergyTransactionRequest.builder("TRecipientAddress", estimate.energy())
+                    EnergyTransactionRequest.builder("TRecipientAddress", estimate.amount())
                             .duration(1)
                             .externalId("order-42")
                             .activateAddress(true)
@@ -178,7 +178,7 @@ colecciones nunca son `null`, y los valores que la API puede omitir son
 // Energía, con activación opcional de la dirección en la misma llamada.
 Transaction tx = client.createEnergyTransaction(
         EnergyTransactionRequest.builder("TRecipientAddress", 65000)
-                .duration(1)          // horas; 1 o 24
+                .duration(1)          // horas; solo se admite 1
                 .externalId("order-42")
                 .activateAddress(true)
                 .build());
@@ -198,10 +198,10 @@ tx = client.createAddressActivationTransaction(
         AddressActivationRequest.of("TRecipientAddress", "activation-1"));
 ```
 
-El precio de la energía es por unidad y el del ancho de banda por 1000 unidades:
-en `getServices()`, `EnergyRate.price()` × 65000 es el coste de 65000 de energía,
-mientras que 345 de ancho de banda con un `BandwidthRate.price()` de 1 cuestan
-0.345.
+En `getServices()` los precios son por 1000 unidades tanto para la energía como
+para el ancho de banda: 65000 de energía con un `EnergyRate.price()` de 0.03
+cuestan 0.03 × 65000 / 1000 = 1.95, y 345 de ancho de banda con un
+`BandwidthRate.price()` de 1 cuestan 0.345.
 
 Actualmente la API informa un paquete de recursos con `service()` igual a
 `Service.ENERGY`, no `Service.RESOURCE_BUNDLE`. Consulta `params().amounts()` para

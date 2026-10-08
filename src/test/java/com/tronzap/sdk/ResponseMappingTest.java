@@ -48,7 +48,7 @@ class ResponseMappingTest {
         Services services = respond("""
                 {
                   "energy": [
-                    {"duration":1,"min_amount":50000,"max_amount":131000,"min_energy":50000,"max_energy":131000,
+                    {"duration":1,"min_amount":50000,"max_amount":131000,
                      "price":0.052300000,"price_32k":1.67,"price_65k":3.4,"price_131k":6.85}
                   ],
                   "bandwidth": [{"duration":1,"min_amount":1000,"max_amount":50000,"price":1}],
@@ -57,12 +57,31 @@ class ResponseMappingTest {
 
         assertEquals(1, services.energy().size());
         var tier = services.energy().get(0);
-        assertEquals(50000, tier.minEnergy());
-        assertEquals(131000, tier.maxEnergy());
+        assertEquals(50000, tier.minAmount());
+        assertEquals(131000, tier.maxAmount());
         assertEquals(new BigDecimal("0.052300000"), tier.price(), "scale is kept as sent");
         assertDecimal("6.85", tier.price131k());
         assertDecimal("1", services.bandwidth().get(0).price());
         assertDecimal("1.4", services.activateAddress().orElseThrow().price());
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void deprecatedEnergyRateBoundsMirrorAmounts() throws Exception {
+        Services services = respond("""
+                {"energy": [
+                  {"duration":1,"min_amount":50000,"max_amount":131000,
+                   "price":0.03,"price_32k":0.96,"price_65k":1.95,"price_131k":3.93},
+                  {"duration":24,"min_amount":32000,"max_amount":65000,"min_energy":1,"max_energy":2,
+                   "price":0.03,"price_32k":0.96,"price_65k":1.95,"price_131k":3.93}
+                ]}""", TronzapClient::getServices);
+
+        var withoutDeprecated = services.energy().get(0);
+        assertEquals(50000, withoutDeprecated.minEnergy());
+        assertEquals(131000, withoutDeprecated.maxEnergy());
+        var withDiffering = services.energy().get(1);
+        assertEquals(32000, withDiffering.minEnergy());
+        assertEquals(65000, withDiffering.maxEnergy());
     }
 
     @Test
@@ -112,11 +131,10 @@ class ResponseMappingTest {
     @Test
     void energyEstimate() throws Exception {
         EnergyEstimate estimate = respond("""
-                {"amount":64400,"energy":64400,"duration":1,"price":3.66,"activation_fee":0,"total":3.66,
+                {"amount":64400,"duration":1,"price":3.66,"activation_fee":0,"total":3.66,
                  "from_address":"TFrom","to_address":"TTo","contract_address":"TContract"}""",
                 client -> client.estimateEnergy(com.tronzap.sdk.request.EstimateEnergyRequest.of("TFrom", "TTo")));
 
-        assertEquals(64400, estimate.energy());
         assertEquals(64400, estimate.amount());
         assertDecimal("3.66", estimate.total());
         assertDecimal("0", estimate.activationFee());
@@ -124,9 +142,41 @@ class ResponseMappingTest {
     }
 
     @Test
+    @SuppressWarnings("deprecation")
+    void deprecatedEstimateEnergyMirrorsAmount() throws Exception {
+        String withoutDeprecated = """
+                {"amount":65000,"duration":1,"price":1.95,"activation_fee":0,"total":1.95,
+                 "from_address":"TFrom","to_address":"TTo","contract_address":"TContract"}""";
+        String withDiffering = """
+                {"amount":65000,"energy":1,"duration":1,"price":1.95,"activation_fee":0,"total":1.95,
+                 "from_address":"TFrom","to_address":"TTo","contract_address":"TContract"}""";
+
+        for (String result : List.of(withoutDeprecated, withDiffering)) {
+            EnergyEstimate estimate = respond(result,
+                    client -> client.estimateEnergy(com.tronzap.sdk.request.EstimateEnergyRequest.of("TFrom", "TTo")));
+            assertEquals(65000, estimate.energy(), result);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void deprecatedCalculationEnergyMirrorsAmount() throws Exception {
+        String withoutDeprecated = """
+                {"address":"TAddress","type":"energy","amount":65000,"duration":1,"price":1.95,"activation_fee":0,"total":1.95}""";
+        String withDiffering = """
+                {"address":"TAddress","type":"energy","amount":65000,"energy":1,"duration":1,"price":1.95,"activation_fee":0,"total":1.95}""";
+
+        for (String result : List.of(withoutDeprecated, withDiffering)) {
+            Calculation calculation = respond(result,
+                    client -> client.calculate(com.tronzap.sdk.request.CalculateRequest.of("TAddress", 65000)));
+            assertEquals(65000, calculation.energy(), result);
+        }
+    }
+
+    @Test
     void calculation() throws Exception {
         Calculation calculation = respond("""
-                {"address":"TAddress","type":"energy","amount":65000,"energy":65000,
+                {"address":"TAddress","type":"energy","amount":65000,
                  "duration":1,"price":1.67,"activation_fee":0,"total":1.67}""",
                 client -> client.calculate(com.tronzap.sdk.request.CalculateRequest.of("TAddress", 65000)));
 

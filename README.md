@@ -68,7 +68,7 @@ public class QuickStart {
                     EstimateEnergyRequest.of("TSenderAddress", "TRecipientAddress"));
 
             Transaction tx = client.createEnergyTransaction(
-                    EnergyTransactionRequest.builder("TRecipientAddress", estimate.energy())
+                    EnergyTransactionRequest.builder("TRecipientAddress", estimate.amount())
                             .duration(1)
                             .externalId("order-42")
                             .activateAddress(true)
@@ -176,7 +176,7 @@ Results are immutable records in `com.tronzap.sdk.response`. Collections are nev
 // Energy, optionally activating the address in the same call.
 Transaction tx = client.createEnergyTransaction(
         EnergyTransactionRequest.builder("TRecipientAddress", 65000)
-                .duration(1)          // hours; 1 or 24
+                .duration(1)          // hours; only 1 is supported
                 .externalId("order-42")
                 .activateAddress(true)
                 .build());
@@ -196,8 +196,8 @@ tx = client.createAddressActivationTransaction(
         AddressActivationRequest.of("TRecipientAddress", "activation-1"));
 ```
 
-Energy prices are per unit, bandwidth prices are per 1000 units: in
-`getServices()`, `EnergyRate.price()` × 65000 is the cost of 65000 energy, while
+Prices in `getServices()` are per 1000 units for both energy and bandwidth: 65000
+energy at an `EnergyRate.price()` of 0.03 costs 0.03 × 65000 / 1000 = 1.95, and
 345 bandwidth at a `BandwidthRate.price()` of 1 costs 0.345.
 
 The API currently reports a resource bundle with `service()` equal to

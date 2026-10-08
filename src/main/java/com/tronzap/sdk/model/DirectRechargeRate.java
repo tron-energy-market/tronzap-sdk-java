@@ -9,7 +9,7 @@ import java.util.Objects;
  * @param duration the rental duration in hours this tier applies to
  * @param minEnergy the smallest purchasable energy amount in this tier
  * @param maxEnergy the largest purchasable energy amount in this tier
- * @param price the cost of a single unit of energy
+ * @param price the cost of 1000 units of energy
  * @param price32k the price of 32,000 energy at this tier
  * @param price65k the price of 65,000 energy at this tier
  * @param price131k the price of 131,000 energy at this tier
@@ -29,7 +29,7 @@ public record DirectRechargeRate(
      * @param duration the rental duration in hours this tier applies to
      * @param minEnergy the smallest purchasable energy amount in this tier
      * @param maxEnergy the largest purchasable energy amount in this tier
-     * @param price the cost of a single unit of energy
+     * @param price the cost of 1000 units of energy
      * @param price32k the price of 32,000 energy at this tier
      * @param price65k the price of 65,000 energy at this tier
      * @param price131k the price of 131,000 energy at this tier

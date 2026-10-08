@@ -10,7 +10,7 @@ import java.util.Objects;
  * @param address the address the quote was made for
  * @param type the resource type that was priced
  * @param amount the resource amount that was priced
- * @param energy the energy amount that was priced
+ * @param energy the same value as {@link #amount()}, deprecated
  * @param duration the rental duration in hours
  * @param price the cost of the resources
  * @param activationFee the address activation fee included in {@code total}, zero when none
@@ -32,7 +32,7 @@ public record Calculation(
      * @param address the address the quote was made for
      * @param type the resource type that was priced
      * @param amount the resource amount that was priced
-     * @param energy the energy amount that was priced
+     * @param energy the same value as {@code amount}
      * @param duration the rental duration in hours
      * @param price the cost of the resources
      * @param activationFee the address activation fee included in {@code total}, zero when none
@@ -44,5 +44,17 @@ public record Calculation(
         Objects.requireNonNull(price, "price");
         Objects.requireNonNull(activationFee, "activationFee");
         Objects.requireNonNull(total, "total");
+    }
+
+    /**
+     * Returns the priced energy amount.
+     *
+     * @return the same value as {@link #amount()}
+     * @deprecated use {@link #amount()}
+     */
+    @Deprecated
+    @Override
+    public long energy() {
+        return energy;
     }
 }

@@ -68,7 +68,7 @@ public class QuickStart {
                     EstimateEnergyRequest.of("TSenderAddress", "TRecipientAddress"));
 
             Transaction tx = client.createEnergyTransaction(
-                    EnergyTransactionRequest.builder("TRecipientAddress", estimate.energy())
+                    EnergyTransactionRequest.builder("TRecipientAddress", estimate.amount())
                             .duration(1)
                             .externalId("order-42")
                             .activateAddress(true)
@@ -177,7 +177,7 @@ TronzapClient client = TronzapClient.builder()
 // Энергия, при необходимости с активацией адреса в том же вызове.
 Transaction tx = client.createEnergyTransaction(
         EnergyTransactionRequest.builder("TRecipientAddress", 65000)
-                .duration(1)          // часы; 1 или 24
+                .duration(1)          // часы; поддерживается только 1
                 .externalId("order-42")
                 .activateAddress(true)
                 .build());
@@ -197,9 +197,10 @@ tx = client.createAddressActivationTransaction(
         AddressActivationRequest.of("TRecipientAddress", "activation-1"));
 ```
 
-Цена энергии указана за единицу, цена bandwidth — за 1000 единиц: в
-`getServices()` `EnergyRate.price()` × 65000 — это стоимость 65000 энергии, а 345
-bandwidth при `BandwidthRate.price()`, равном 1, стоят 0.345.
+В `getServices()` цены указаны за 1000 единиц и для энергии, и для bandwidth:
+65000 энергии при `EnergyRate.price()`, равном 0.03, стоят
+0.03 × 65000 / 1000 = 1.95, а 345 bandwidth при `BandwidthRate.price()`, равном 1,
+стоят 0.345.
 
 Сейчас API возвращает пакет ресурсов с `service()`, равным `Service.ENERGY`, а не
 `Service.RESOURCE_BUNDLE`. Состав покупки смотрите в `params().amounts()`.

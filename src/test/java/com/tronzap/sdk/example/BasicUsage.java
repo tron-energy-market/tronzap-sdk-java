@@ -89,8 +89,8 @@ public final class BasicUsage {
         step("getServices", () -> {
             var services = client.getServices();
             services.energy().forEach(rate -> System.out.printf(
-                    "  energy %dh %d..%d at %s per unit (65k = %s)%n",
-                    rate.duration(), rate.minEnergy(), rate.maxEnergy(), rate.price().toPlainString(), rate.price65k().toPlainString()));
+                    "  energy %dh %d..%d at %s per 1000 units (65k = %s)%n",
+                    rate.duration(), rate.minAmount(), rate.maxAmount(), rate.price().toPlainString(), rate.price65k().toPlainString()));
             services.bandwidth().forEach(rate -> System.out.printf(
                     "  bandwidth %dh %d..%d at %s per 1000 units%n",
                     rate.duration(), rate.minAmount(), rate.maxAmount(), rate.price().toPlainString()));
@@ -116,14 +116,14 @@ public final class BasicUsage {
         optionalStep("calculate", address, value -> {
             var calculation = client.calculate(CalculateRequest.of(value, ENERGY));
             System.out.printf("  %d energy for %dh costs %s%n",
-                    calculation.energy(), calculation.duration(), calculation.total().toPlainString());
+                    calculation.amount(), calculation.duration(), calculation.total().toPlainString());
         });
 
         Optional<String> from = env("TRONZAP_FROM_ADDRESS");
         Optional<String> to = env("TRONZAP_TO_ADDRESS");
         optionalStep("estimateEnergy", from.isPresent() && to.isPresent() ? from : Optional.empty(), value -> {
             var estimate = client.estimateEnergy(EstimateEnergyRequest.of(value, to.orElseThrow()));
-            System.out.printf("  %d energy, total %s%n", estimate.energy(), estimate.total().toPlainString());
+            System.out.printf("  %d energy, total %s%n", estimate.amount(), estimate.total().toPlainString());
         });
         optionalStep("checkTransaction", env("TRONZAP_TRANSACTION_ID"),
                 value -> print(client.checkTransaction(CheckTransactionRequest.byId(value))));

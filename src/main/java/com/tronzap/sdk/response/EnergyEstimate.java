@@ -7,7 +7,7 @@ import java.util.Objects;
  * The energy a transfer needs and what it would cost.
  *
  * @param amount the estimated resource amount
- * @param energy the estimated energy amount
+ * @param energy the same value as {@link #amount()}, deprecated
  * @param duration the rental duration in hours the price refers to
  * @param price the cost of the energy
  * @param activationFee the address activation fee included in {@code total}, zero when none
@@ -31,7 +31,7 @@ public record EnergyEstimate(
      * Validates the components.
      *
      * @param amount the estimated resource amount
-     * @param energy the estimated energy amount
+     * @param energy the same value as {@code amount}
      * @param duration the rental duration in hours the price refers to
      * @param price the cost of the energy
      * @param activationFee the address activation fee included in {@code total}, zero when none
@@ -47,5 +47,17 @@ public record EnergyEstimate(
         Objects.requireNonNull(fromAddress, "fromAddress");
         Objects.requireNonNull(toAddress, "toAddress");
         Objects.requireNonNull(contractAddress, "contractAddress");
+    }
+
+    /**
+     * Returns the estimated energy amount.
+     *
+     * @return the same value as {@link #amount()}
+     * @deprecated use {@link #amount()}
+     */
+    @Deprecated
+    @Override
+    public long energy() {
+        return energy;
     }
 }

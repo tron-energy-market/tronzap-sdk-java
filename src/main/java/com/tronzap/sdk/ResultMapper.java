@@ -70,9 +70,10 @@ final class ResultMapper {
 
     static EnergyEstimate energyEstimate(JsonNode node) {
         JsonNode o = object(node, "result");
+        long amount = integer(o, "amount");
         return new EnergyEstimate(
-                integer(o, "amount"),
-                integer(o, "energy"),
+                amount,
+                amount,
                 int32(o, "duration"),
                 decimal(o, "price"),
                 decimal(o, "activation_fee"),
@@ -84,11 +85,12 @@ final class ResultMapper {
 
     static Calculation calculation(JsonNode node) {
         JsonNode o = object(node, "result");
+        long amount = integer(o, "amount");
         return new Calculation(
                 text(o, "address"),
                 Service.fromValue(text(o, "type")),
-                integer(o, "amount"),
-                integer(o, "energy"),
+                amount,
+                amount,
                 int32(o, "duration"),
                 decimal(o, "price"),
                 decimal(o, "activation_fee"),
@@ -162,12 +164,14 @@ final class ResultMapper {
 
     private static EnergyRate energyRate(JsonNode node) {
         JsonNode o = object(node, "energy rate");
+        long minAmount = integer(o, "min_amount");
+        long maxAmount = integer(o, "max_amount");
         return new EnergyRate(
                 int32(o, "duration"),
-                integer(o, "min_amount"),
-                integer(o, "max_amount"),
-                integer(o, "min_energy"),
-                integer(o, "max_energy"),
+                minAmount,
+                maxAmount,
+                minAmount,
+                maxAmount,
                 decimal(o, "price"),
                 decimal(o, "price_32k"),
                 decimal(o, "price_65k"),
