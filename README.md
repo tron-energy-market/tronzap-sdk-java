@@ -26,14 +26,14 @@ Maven:
 <dependency>
     <groupId>com.tronzap</groupId>
     <artifactId>tronzap-java</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
 Gradle:
 
 ```kotlin
-implementation("com.tronzap:tronzap-java:1.0.0")
+implementation("com.tronzap:tronzap-java:1.1.0")
 ```
 
 ## Requirements

@@ -6,7 +6,7 @@
 
     <groupId>com.tronzap</groupId>
     <artifactId>tronzap-java</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <packaging>jar</packaging>
 
     <name>TronZap Java SDK</name>
@@ -40,7 +40,7 @@
         <connection>scm:git:https://github.com/tron-energy-market/tronzap-sdk-java.git</connection>
         <developerConnection>scm:git:ssh://git@github.com/tron-energy-market/tronzap-sdk-java.git</developerConnection>
         <url>https://github.com/tron-energy-market/tronzap-sdk-java</url>
-        <tag>v1.0.0</tag>
+        <tag>v1.1.0</tag>
     </scm>
 
     <issueManagement>

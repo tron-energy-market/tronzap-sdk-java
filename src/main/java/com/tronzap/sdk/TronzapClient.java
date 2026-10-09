@@ -82,7 +82,7 @@ import java.util.function.Function;
 public final class TronzapClient {
 
     /** The SDK version, reported in the default {@code User-Agent} header. */
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.1.0";
 
     /** The production API endpoint. */
     public static final String DEFAULT_BASE_URL = "https://api.tronzap.com";
