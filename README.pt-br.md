@@ -237,6 +237,14 @@ if (result.status() == AmlStatus.COMPLETED) {
 }
 ```
 
+Em uma verificação por hash, `address` é o endereço do destinatário da
+transação, onde os fundos foram recebidos, e a direção indica de que lado você
+está: `DEPOSIT` se os fundos chegaram ao seu endereço (`address` é o seu
+endereço), `WITHDRAWAL` se foi você quem enviou (`address` é o endereço do
+destinatário externo). O risco é calculado para a contraparte: o remetente em um
+deposit, o destinatário em um withdrawal. Se você omitir a direção, como em
+`forHash(network, address, hash)`, o SDK envia `DEPOSIT`.
+
 `riskScore()` fica vazio até a verificação terminar. Uma verificação concluída pode
 ter pontuação 0, o que não é o mesmo que ainda não ter pontuação.
 

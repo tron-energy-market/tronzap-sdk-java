@@ -1,7 +1,8 @@
 package com.tronzap.sdk.model;
 
 /**
- * The direction of a transaction screened by an {@link AmlType#HASH} check.
+ * Which side of the transaction you are on in an {@link AmlType#HASH} check. The risk is scored for
+ * the counterparty. When a hash check gives no direction, the SDK sends {@link #DEPOSIT}.
  */
 public enum AmlDirection {
 
@@ -11,7 +12,10 @@ public enum AmlDirection {
      */
     DEPOSIT("deposit"),
 
-    /** An outgoing transaction. */
+    /**
+     * You sent the funds: the check's address is the external recipient's address and the recipient
+     * is scored.
+     */
     WITHDRAWAL("withdrawal"),
 
     /** A value this version of the SDK does not know. */

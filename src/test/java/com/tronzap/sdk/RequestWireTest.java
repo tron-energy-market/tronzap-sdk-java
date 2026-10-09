@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tronzap.sdk.model.AmlDirection;
 import com.tronzap.sdk.model.AmlStatus;
+import com.tronzap.sdk.model.AmlType;
 import com.tronzap.sdk.model.SubscriptionStatus;
 import com.tronzap.sdk.request.AddressActivationRequest;
 import com.tronzap.sdk.request.AmlCheckRequest;
@@ -89,6 +90,16 @@ class RequestWireTest {
                 wire("createAmlCheck hash", "/v1/aml-checks/new",
                         "{\"type\":\"hash\",\"network\":\"BTC\",\"address\":\"bc1address\",\"hash\":\"E3F2\",\"direction\":\"withdrawal\"}", "{}",
                         c -> c.createAmlCheck(AmlCheckRequest.forHash("BTC", "bc1address", "E3F2", AmlDirection.WITHDRAWAL))),
+                wire("createAmlCheck hash without direction", "/v1/aml-checks/new",
+                        "{\"type\":\"hash\",\"network\":\"BTC\",\"address\":\"bc1address\",\"hash\":\"E3F2\",\"direction\":\"deposit\"}", "{}",
+                        c -> c.createAmlCheck(AmlCheckRequest.forHash("BTC", "bc1address", "E3F2"))),
+                wire("createAmlCheck hash with null direction", "/v1/aml-checks/new",
+                        "{\"type\":\"hash\",\"network\":\"BTC\",\"address\":\"bc1address\",\"hash\":\"E3F2\",\"direction\":\"deposit\"}", "{}",
+                        c -> c.createAmlCheck(AmlCheckRequest.forHash("BTC", "bc1address", "E3F2", null))),
+                wire("createAmlCheck address with direction", "/v1/aml-checks/new",
+                        "{\"type\":\"address\",\"network\":\"TRX\",\"address\":\"TAddress\",\"direction\":\"withdrawal\"}", "{}",
+                        c -> c.createAmlCheck(new AmlCheckRequest(AmlType.ADDRESS, "TRX", "TAddress",
+                                Optional.empty(), Optional.of(AmlDirection.WITHDRAWAL)))),
                 wire("checkAmlStatus", "/v1/aml-checks/check", "{\"id\":\"aml-1\"}", "{}", c -> c.checkAmlStatus("aml-1")),
                 wire("getAmlHistory defaults", "/v1/aml-checks/history", "{\"page\":1,\"per_page\":10}", "{}",
                         c -> c.getAmlHistory()),

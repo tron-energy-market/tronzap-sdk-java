@@ -237,6 +237,14 @@ if (result.status() == AmlStatus.COMPLETED) {
 }
 ```
 
+For a hash check, `address` is the recipient address of the transaction, where
+the funds were received, and the direction says which side you are on: `DEPOSIT`
+if the funds were sent to your address (`address` is your address), `WITHDRAWAL`
+if you sent them (`address` is the external recipient's address). The risk is
+scored for the counterparty: the sender of a deposit, the recipient of a
+withdrawal. When you omit the direction, as in `forHash(network, address, hash)`,
+the SDK sends `DEPOSIT`.
+
 `riskScore()` is empty until screening finishes. A completed check can have a
 score of 0, which is not the same as having no score yet.
 

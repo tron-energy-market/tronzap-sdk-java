@@ -9,6 +9,8 @@ import com.tronzap.sdk.exception.NetworkException;
 import com.tronzap.sdk.exception.RequestInterruptedException;
 import com.tronzap.sdk.exception.RequestTimeoutException;
 import com.tronzap.sdk.exception.TronzapException;
+import com.tronzap.sdk.model.AmlDirection;
+import com.tronzap.sdk.model.AmlType;
 import com.tronzap.sdk.model.Service;
 import com.tronzap.sdk.request.AddressActivationRequest;
 import com.tronzap.sdk.request.AmlCheckRequest;
@@ -299,6 +301,8 @@ public final class TronzapClient {
      * {@link #checkAmlStatus(String)} until the status is {@link
      * com.tronzap.sdk.model.AmlStatus#COMPLETED}.
      *
+     * <p>For a hash check without a direction, the SDK sends {@link AmlDirection#DEPOSIT}.
+     *
      * @param request what to screen
      * @return the created AML check
      * @throws TronzapException if the request fails
@@ -310,7 +314,10 @@ public final class TronzapClient {
                 .put("network", request.network())
                 .put("address", request.address());
         request.hash().ifPresent(hash -> params.put("hash", hash));
-        request.direction().ifPresent(direction -> params.put("direction", direction.value()));
+        Optional<AmlDirection> direction = request.type() == AmlType.HASH
+                ? Optional.of(request.direction().orElse(AmlDirection.DEPOSIT))
+                : request.direction();
+        direction.ifPresent(value -> params.put("direction", value.value()));
         return call("/v1/aml-checks/new", params, ResultMapper::amlCheck);
     }
 

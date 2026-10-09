@@ -19,7 +19,7 @@ import java.util.Optional;
  *
  * @param id the check identifier
  * @param type what was screened
- * @param address the screened address
+ * @param address the screened address; for a hash check, the recipient address of the transaction
  * @param hash the screened transaction hash, empty for address checks
  * @param direction the screened transaction direction, empty for address checks
  * @param network the blockchain network code, for example {@code TRX}, {@code BTC} or {@code ETH}
@@ -49,7 +49,8 @@ public record AmlCheck(
      *
      * @param id the check identifier
      * @param type what was screened
-     * @param address the screened address
+     * @param address the screened address; for a hash check, the recipient address of the
+     *     transaction
      * @param hash the screened transaction hash, empty for address checks
      * @param direction the screened transaction direction, empty for address checks
      * @param network the blockchain network code, for example {@code TRX}, {@code BTC} or {@code ETH}
