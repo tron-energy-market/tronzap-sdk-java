@@ -160,13 +160,19 @@ limita toda la solicitud, incluido un cuerpo de respuesta que llega lentamente.
 | `createAmlCheck(request)` | `/v1/aml-checks/new` | Iniciar una verificación AML |
 | `checkAmlStatus(id)` | `/v1/aml-checks/check` | Estado y resultado de una verificación AML |
 | `getAmlHistory()` / `getAmlHistory(request)` | `/v1/aml-checks/history` | Historial paginado de verificaciones AML |
+| `getSubscriptions()` | `/v1/subscriptions` | Planes de suscripción y precios |
+| `startSubscription(request)` | `/v1/subscription/start` | Suscribir una dirección a un plan |
+| `checkSubscription(request)` | `/v1/subscription/check` | Estado de una suscripción, por id o id externo |
+| `stopSubscription(request)` | `/v1/subscription/stop` | Detener una suscripción |
+| `getSubscriptionHistory()` / `getSubscriptionHistory(request)` | `/v1/subscriptions/history` | Historial paginado de suscripciones |
 
 Los parámetros son records inmutables en `com.tronzap.sdk.request`. Cada uno tiene
 una fábrica `of(...)` con los valores obligatorios, y los que tienen varios valores
 opcionales también tienen un `builder(...)`. Una solicitud se valida al crearse,
 así que una solicitud inválida nunca se envía. Los valores por defecto coinciden
-con la API: `duration` es 1 hora y el historial AML empieza en la página 1 con 10
-elementos.
+con la API: `duration` es 1 hora y los historiales AML y de suscripciones empiezan
+en la página 1 con 10 elementos. La excepción es `StartSubscriptionRequest`, donde
+un `durationDays` o `transactionsLimit` igual a cero significa sin límite.
 
 Los resultados son records inmutables en `com.tronzap.sdk.response`. Las
 colecciones nunca son `null`, y los valores que la API puede omitir son
@@ -237,6 +243,39 @@ if (result.status() == AmlStatus.COMPLETED) {
 completada puede tener una puntuación de 0, que no es lo mismo que no tener
 puntuación todavía.
 
+### Suscripciones
+
+Una suscripción mantiene una dirección abastecida de energía para cada transacción
+hasta que se detiene o se agotan sus días o transacciones. Elija un plan de
+`getSubscriptions()` y pase su `subscriptionId()`, como `"unlimited_energy"`, no su
+`id()` numérico. Iniciar una suscripción cobra el precio inicial del plan.
+
+```java
+List<SubscriptionPlan> plans = client.getSubscriptions();
+for (SubscriptionPlan plan : plans) {
+    System.out.println(plan.subscriptionId() + " " + plan.initialPrice() + " " + plan.price());
+}
+
+Subscription sub = client.startSubscription(
+        StartSubscriptionRequest.builder("unlimited_energy", "TRecipientAddress")
+                .durationDays(30)         // 0 para no limitar el tiempo
+                .transactionsLimit(0)     // 0 para no limitar
+                .externalId("subscription-42")
+                .build());
+
+sub = client.checkSubscription(SubscriptionRequest.byExternalId("subscription-42"));
+
+sub = client.stopSubscription(SubscriptionRequest.byId(sub.id()));
+
+SubscriptionHistory history = client.getSubscriptionHistory(
+        SubscriptionHistoryRequest.of(1, 10, SubscriptionStatus.ACTIVE));
+```
+
+Iniciar, consultar y detener devuelven la suscripción con sus `params()`; el
+historial devuelve en su lugar los contadores de uso `transactionsUsed()`,
+`energyUsed()` y `totalPrice()`, con `params()` vacío. Una suscripción con límite
+de transacciones no se puede detener (`CANNOT_STOP_SUBSCRIPTION`).
+
 ## Gestión de errores
 
 Todo fallo de una llamada a la API es una `TronzapException` no comprobada
@@ -304,11 +343,11 @@ con un código distinto de cero siempre se informa como `ApiException`, nunca co
 | 2 | `INVALID_SERVICE_OR_PARAMS` | Servicio o parámetros inválidos |
 | 5 | `WALLET_NOT_FOUND` | Billetera interna no encontrada. Contacta con soporte. |
 | 6 | `INSUFFICIENT_FUNDS` | Fondos insuficientes |
-| 10 | `INVALID_TRON_ADDRESS` | Dirección TRON inválida |
+| 10 | `INVALID_TRON_ADDRESS` | Dirección TRON inválida, o la dirección ya tiene una suscripción activa |
 | 11 | `INVALID_ENERGY_AMOUNT` | Cantidad de energía inválida |
 | 12 | `INVALID_DURATION` | Duración inválida |
 | 20 | `TRANSACTION_NOT_FOUND` | Transacción/suscripción no encontrada |
-| 21 | `CANNOT_STOP_SUBSCRIPTION` | No se puede detener la suscripción |
+| 21 | `CANNOT_STOP_SUBSCRIPTION` | No se puede detener la suscripción, p. ej. tiene límite de transacciones |
 | 24 | `ADDRESS_NOT_ACTIVATED` | Dirección no activada |
 | 25 | `ADDRESS_ALREADY_ACTIVATED` | Dirección ya activada |
 | 30 | `AML_CHECK_NOT_FOUND` | Verificación AML no encontrada |

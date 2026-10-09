@@ -1,25 +1,34 @@
 package com.tronzap.sdk.model;
 
 /**
- * The direction of a transaction screened by an {@link AmlType#HASH} check.
+ * The status of a subscription.
  */
-public enum AmlDirection {
+public enum SubscriptionStatus {
 
-    /**
-     * The funds were sent to your address: the check's address is your address and the sender is
-     * scored.
-     */
-    DEPOSIT("deposit"),
+    /** The subscription was created but has not started yet. */
+    NEW("new"),
 
-    /** An outgoing transaction. */
-    WITHDRAWAL("withdrawal"),
+    /** The subscription is being started. */
+    PENDING("pending"),
+
+    /** The subscription could not be started. */
+    ERROR("error"),
+
+    /** The subscription is delegating energy. */
+    ACTIVE("active"),
+
+    /** The subscription was stopped. */
+    STOPPED("stopped"),
+
+    /** The subscription ran out of time or transactions. */
+    EXPIRED("expired"),
 
     /** A value this version of the SDK does not know. */
     UNKNOWN("");
 
     private final String value;
 
-    AmlDirection(String value) {
+    SubscriptionStatus(String value) {
         this.value = value;
     }
 
@@ -38,8 +47,8 @@ public enum AmlDirection {
      * @param value the value as the API encodes it, may be {@code null}
      * @return the matching constant, or {@link #UNKNOWN} when there is none
      */
-    public static AmlDirection fromValue(String value) {
-        for (AmlDirection candidate : values()) {
+    public static SubscriptionStatus fromValue(String value) {
+        for (SubscriptionStatus candidate : values()) {
             if (candidate != UNKNOWN && candidate.value.equals(value)) {
                 return candidate;
             }

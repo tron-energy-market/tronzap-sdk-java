@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tronzap.sdk.model.AmlDirection;
 import com.tronzap.sdk.model.AmlStatus;
+import com.tronzap.sdk.model.SubscriptionStatus;
 import com.tronzap.sdk.request.AddressActivationRequest;
 import com.tronzap.sdk.request.AmlCheckRequest;
 import com.tronzap.sdk.request.AmlHistoryRequest;
@@ -14,9 +15,13 @@ import com.tronzap.sdk.request.CheckTransactionRequest;
 import com.tronzap.sdk.request.EnergyTransactionRequest;
 import com.tronzap.sdk.request.EstimateEnergyRequest;
 import com.tronzap.sdk.request.ResourceBundleTransactionRequest;
+import com.tronzap.sdk.request.StartSubscriptionRequest;
+import com.tronzap.sdk.request.SubscriptionHistoryRequest;
+import com.tronzap.sdk.request.SubscriptionRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -89,7 +94,31 @@ class RequestWireTest {
                         c -> c.getAmlHistory()),
                 wire("getAmlHistory with filter", "/v1/aml-checks/history",
                         "{\"page\":2,\"per_page\":5,\"status\":\"completed\"}", "{}",
-                        c -> c.getAmlHistory(AmlHistoryRequest.of(2, 5, AmlStatus.COMPLETED))));
+                        c -> c.getAmlHistory(AmlHistoryRequest.of(2, 5, AmlStatus.COMPLETED))),
+                wire("getSubscriptions", "/v1/subscriptions", "{}", "{}", c -> c.getSubscriptions()),
+                wire("startSubscription all options", "/v1/subscription/start",
+                        "{\"subscription_id\":\"unlimited_energy\",\"external_id\":\"sub-1\",\"params\":{\"address\":\"TAddress\",\"duration\":30,\"transactions_limit\":100,\"activate_address\":true}}", "{}",
+                        c -> c.startSubscription(StartSubscriptionRequest.builder("unlimited_energy", "TAddress")
+                                .durationDays(30).transactionsLimit(100).externalId("sub-1").activateAddress(true).build())),
+                wire("startSubscription sends zero limits", "/v1/subscription/start",
+                        "{\"subscription_id\":\"unlimited_energy\",\"params\":{\"address\":\"TAddress\",\"duration\":0,\"transactions_limit\":0}}", "{}",
+                        c -> c.startSubscription(StartSubscriptionRequest.of("unlimited_energy", "TAddress"))),
+                wire("startSubscription keeps external id 0", "/v1/subscription/start",
+                        "{\"subscription_id\":\"unlimited_energy\",\"external_id\":\"0\",\"params\":{\"address\":\"TAddress\",\"duration\":1,\"transactions_limit\":0}}", "{}",
+                        c -> c.startSubscription(StartSubscriptionRequest.builder("unlimited_energy", "TAddress")
+                                .durationDays(1).externalId("0").build())),
+                wire("checkSubscription by id", "/v1/subscription/check", "{\"id\":\"sub-id\"}", "{}",
+                        c -> c.checkSubscription(SubscriptionRequest.byId("sub-id"))),
+                wire("checkSubscription by external id", "/v1/subscription/check", "{\"external_id\":\"sub-1\"}", "{}",
+                        c -> c.checkSubscription(SubscriptionRequest.byExternalId("sub-1"))),
+                wire("stopSubscription with both ids", "/v1/subscription/stop",
+                        "{\"id\":\"sub-id\",\"external_id\":\"sub-1\"}", "{}",
+                        c -> c.stopSubscription(new SubscriptionRequest(Optional.of("sub-id"), Optional.of("sub-1")))),
+                wire("getSubscriptionHistory defaults", "/v1/subscriptions/history", "{\"page\":1,\"per_page\":10}", "{}",
+                        c -> c.getSubscriptionHistory()),
+                wire("getSubscriptionHistory with filter", "/v1/subscriptions/history",
+                        "{\"page\":2,\"per_page\":50,\"status\":\"active\"}", "{}",
+                        c -> c.getSubscriptionHistory(SubscriptionHistoryRequest.of(2, 50, SubscriptionStatus.ACTIVE))));
     }
 
     private static Arguments wire(String name, String path, String body, String result, Consumer<TronzapClient> call) {

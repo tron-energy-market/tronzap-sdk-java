@@ -160,12 +160,19 @@ request, including a response body that arrives slowly.
 | `createAmlCheck(request)` | `/v1/aml-checks/new` | Start an AML screening |
 | `checkAmlStatus(id)` | `/v1/aml-checks/check` | Status and result of an AML check |
 | `getAmlHistory()` / `getAmlHistory(request)` | `/v1/aml-checks/history` | Paginated AML check history |
+| `getSubscriptions()` | `/v1/subscriptions` | Subscription plans and prices |
+| `startSubscription(request)` | `/v1/subscription/start` | Subscribe an address to a plan |
+| `checkSubscription(request)` | `/v1/subscription/check` | Status of a subscription, by id or external id |
+| `stopSubscription(request)` | `/v1/subscription/stop` | Stop a subscription |
+| `getSubscriptionHistory()` / `getSubscriptionHistory(request)` | `/v1/subscriptions/history` | Paginated subscription history |
 
 Parameters live in immutable request records in `com.tronzap.sdk.request`. Each
 has an `of(...)` factory for the required values, and the ones with several
 optional values also have a `builder(...)`. A request validates itself when it is
 created, so an invalid one is never sent. Defaults match the API: `duration` is 1
-hour, and AML history starts at page 1 with 10 items.
+hour, and AML and subscription history start at page 1 with 10 items. The
+exception is `StartSubscriptionRequest`, where a zero `durationDays` or
+`transactionsLimit` means no limit.
 
 Results are immutable records in `com.tronzap.sdk.response`. Collections are never
 `null`, and values the API may omit are `Optional`.
@@ -233,6 +240,39 @@ if (result.status() == AmlStatus.COMPLETED) {
 `riskScore()` is empty until screening finishes. A completed check can have a
 score of 0, which is not the same as having no score yet.
 
+### Subscriptions
+
+A subscription keeps an address supplied with energy for every transaction until
+it is stopped or runs out of days or transactions. Pick a plan from
+`getSubscriptions()` and pass its `subscriptionId()`, such as `"unlimited_energy"`,
+not its numeric `id()`. Starting a subscription charges the plan's initial price.
+
+```java
+List<SubscriptionPlan> plans = client.getSubscriptions();
+for (SubscriptionPlan plan : plans) {
+    System.out.println(plan.subscriptionId() + " " + plan.initialPrice() + " " + plan.price());
+}
+
+Subscription sub = client.startSubscription(
+        StartSubscriptionRequest.builder("unlimited_energy", "TRecipientAddress")
+                .durationDays(30)         // 0 for no time limit
+                .transactionsLimit(0)     // 0 for no limit
+                .externalId("subscription-42")
+                .build());
+
+sub = client.checkSubscription(SubscriptionRequest.byExternalId("subscription-42"));
+
+sub = client.stopSubscription(SubscriptionRequest.byId(sub.id()));
+
+SubscriptionHistory history = client.getSubscriptionHistory(
+        SubscriptionHistoryRequest.of(1, 10, SubscriptionStatus.ACTIVE));
+```
+
+Start, check and stop return the subscription with its `params()`; the history
+returns the usage counters `transactionsUsed()`, `energyUsed()` and `totalPrice()`
+instead, and an empty `params()`. A subscription with a transactions limit cannot
+be stopped (`CANNOT_STOP_SUBSCRIPTION`).
+
 ## Error handling
 
 Every failure of an API call is an unchecked `TronzapException`. Catch a subclass
@@ -298,11 +338,11 @@ a non-zero code is always reported as `ApiException`, never as `HttpException`.
 | 2 | `INVALID_SERVICE_OR_PARAMS` | Invalid service or parameters |
 | 5 | `WALLET_NOT_FOUND` | Internal wallet not found. Contact support. |
 | 6 | `INSUFFICIENT_FUNDS` | Insufficient funds |
-| 10 | `INVALID_TRON_ADDRESS` | Invalid TRON address |
+| 10 | `INVALID_TRON_ADDRESS` | Invalid TRON address, or the address already has an active subscription |
 | 11 | `INVALID_ENERGY_AMOUNT` | Invalid energy amount |
 | 12 | `INVALID_DURATION` | Invalid duration |
 | 20 | `TRANSACTION_NOT_FOUND` | Transaction/subscription not found |
-| 21 | `CANNOT_STOP_SUBSCRIPTION` | Cannot stop subscription |
+| 21 | `CANNOT_STOP_SUBSCRIPTION` | Cannot stop subscription, e.g. it has a transactions limit |
 | 24 | `ADDRESS_NOT_ACTIVATED` | Address not activated |
 | 25 | `ADDRESS_ALREADY_ACTIVATED` | Address already activated |
 | 30 | `AML_CHECK_NOT_FOUND` | AML check not found |

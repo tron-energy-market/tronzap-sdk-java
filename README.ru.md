@@ -160,13 +160,19 @@ TronzapClient client = TronzapClient.builder()
 | `createAmlCheck(request)` | `/v1/aml-checks/new` | Запустить AML-проверку |
 | `checkAmlStatus(id)` | `/v1/aml-checks/check` | Статус и результат AML-проверки |
 | `getAmlHistory()` / `getAmlHistory(request)` | `/v1/aml-checks/history` | История AML-проверок с пагинацией |
+| `getSubscriptions()` | `/v1/subscriptions` | Планы подписок и цены |
+| `startSubscription(request)` | `/v1/subscription/start` | Подписать адрес на план |
+| `checkSubscription(request)` | `/v1/subscription/check` | Статус подписки по id или внешнему id |
+| `stopSubscription(request)` | `/v1/subscription/stop` | Остановить подписку |
+| `getSubscriptionHistory()` / `getSubscriptionHistory(request)` | `/v1/subscriptions/history` | История подписок с пагинацией |
 
 Параметры — неизменяемые records в `com.tronzap.sdk.request`. У каждого есть
 фабрика `of(...)` для обязательных значений, а у тех, где несколько
 необязательных значений, есть ещё и `builder(...)`. Запрос проверяет себя при
 создании, поэтому невалидный запрос никогда не отправляется. Значения по умолчанию
-совпадают с API: `duration` — 1 час, история AML начинается со страницы 1 по 10
-элементов.
+совпадают с API: `duration` — 1 час, история AML и подписок начинается со
+страницы 1 по 10 элементов. Исключение — `StartSubscriptionRequest`: нулевые
+`durationDays` и `transactionsLimit` означают отсутствие ограничения.
 
 Результаты — неизменяемые records в `com.tronzap.sdk.response`. Коллекции никогда
 не бывают `null`, а значения, которые API может не прислать, — `Optional`.
@@ -234,6 +240,40 @@ if (result.status() == AmlStatus.COMPLETED) {
 `riskScore()` пуст, пока проверка не завершится. У завершённой проверки score
 может быть равен 0, и это не то же самое, что отсутствие результата.
 
+### Подписки
+
+Подписка обеспечивает адрес энергией для каждой транзакции, пока её не
+остановят или не закончатся её дни или транзакции. Выберите план из
+`getSubscriptions()` и передайте его `subscriptionId()`, например
+`"unlimited_energy"`, а не числовой `id()`. Запуск подписки списывает начальную
+цену плана.
+
+```java
+List<SubscriptionPlan> plans = client.getSubscriptions();
+for (SubscriptionPlan plan : plans) {
+    System.out.println(plan.subscriptionId() + " " + plan.initialPrice() + " " + plan.price());
+}
+
+Subscription sub = client.startSubscription(
+        StartSubscriptionRequest.builder("unlimited_energy", "TRecipientAddress")
+                .durationDays(30)         // 0 — без ограничения по времени
+                .transactionsLimit(0)     // 0 — без ограничения
+                .externalId("subscription-42")
+                .build());
+
+sub = client.checkSubscription(SubscriptionRequest.byExternalId("subscription-42"));
+
+sub = client.stopSubscription(SubscriptionRequest.byId(sub.id()));
+
+SubscriptionHistory history = client.getSubscriptionHistory(
+        SubscriptionHistoryRequest.of(1, 10, SubscriptionStatus.ACTIVE));
+```
+
+Запуск, проверка и остановка возвращают подписку с её `params()`, а история
+вместо них — счётчики использования `transactionsUsed()`, `energyUsed()` и
+`totalPrice()`, с пустым `params()`. Подписку с лимитом транзакций остановить
+нельзя (`CANNOT_STOP_SUBSCRIPTION`).
+
 ## Обработка ошибок
 
 Любой сбой вызова API — непроверяемое (unchecked) исключение `TronzapException`.
@@ -299,11 +339,11 @@ try {
 | 2 | `INVALID_SERVICE_OR_PARAMS` | Неверный сервис или параметры |
 | 5 | `WALLET_NOT_FOUND` | Внутренний кошелёк не найден. Обратитесь в поддержку. |
 | 6 | `INSUFFICIENT_FUNDS` | Недостаточно средств |
-| 10 | `INVALID_TRON_ADDRESS` | Неверный адрес TRON |
+| 10 | `INVALID_TRON_ADDRESS` | Неверный адрес TRON, или у адреса уже есть активная подписка |
 | 11 | `INVALID_ENERGY_AMOUNT` | Неверное количество энергии |
 | 12 | `INVALID_DURATION` | Неверная длительность |
 | 20 | `TRANSACTION_NOT_FOUND` | Транзакция/подписка не найдена |
-| 21 | `CANNOT_STOP_SUBSCRIPTION` | Невозможно остановить подписку |
+| 21 | `CANNOT_STOP_SUBSCRIPTION` | Невозможно остановить подписку, например, у неё есть лимит транзакций |
 | 24 | `ADDRESS_NOT_ACTIVATED` | Адрес не активирован |
 | 25 | `ADDRESS_ALREADY_ACTIVATED` | Адрес уже активирован |
 | 30 | `AML_CHECK_NOT_FOUND` | AML-проверка не найдена |

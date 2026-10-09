@@ -35,6 +35,13 @@ final class Checks {
         return value;
     }
 
+    static long nonNegative(long value, String name) {
+        if (value < 0) {
+            throw new IllegalArgumentException(name + " cannot be negative, got " + value);
+        }
+        return value;
+    }
+
     static <E extends Enum<E>> E known(E value, E unknown, String name) {
         if (value == null || value == unknown) {
             throw new IllegalArgumentException(name + " is required");

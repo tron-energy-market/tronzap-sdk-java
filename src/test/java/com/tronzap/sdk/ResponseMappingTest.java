@@ -5,14 +5,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.tronzap.sdk.exception.InvalidResponseException;
 import com.tronzap.sdk.model.AmlDirection;
 import com.tronzap.sdk.model.AmlRiskLevel;
 import com.tronzap.sdk.model.AmlStatus;
 import com.tronzap.sdk.model.AmlType;
 import com.tronzap.sdk.model.Service;
+import com.tronzap.sdk.model.SubscriptionParams;
+import com.tronzap.sdk.model.SubscriptionStatus;
 import com.tronzap.sdk.model.TransactionStatus;
 import com.tronzap.sdk.request.CheckTransactionRequest;
 import com.tronzap.sdk.request.EnergyTransactionRequest;
+import com.tronzap.sdk.request.StartSubscriptionRequest;
+import com.tronzap.sdk.request.SubscriptionRequest;
 import com.tronzap.sdk.response.AddressInfo;
 import com.tronzap.sdk.response.AmlCheck;
 import com.tronzap.sdk.response.AmlHistory;
@@ -22,6 +27,9 @@ import com.tronzap.sdk.response.Calculation;
 import com.tronzap.sdk.response.DirectRechargeInfo;
 import com.tronzap.sdk.response.EnergyEstimate;
 import com.tronzap.sdk.response.Services;
+import com.tronzap.sdk.response.Subscription;
+import com.tronzap.sdk.response.SubscriptionHistory;
+import com.tronzap.sdk.response.SubscriptionPlan;
 import com.tronzap.sdk.response.Transaction;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -30,6 +38,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ResponseMappingTest {
 
@@ -377,5 +387,140 @@ class ResponseMappingTest {
 
         assertTrue(history.items().isEmpty());
         assertThrows(UnsupportedOperationException.class, () -> history.items().add(null));
+    }
+
+    private static final String STARTED_SUBSCRIPTION = """
+            {"id":"01m4e1z3q0r7x225zc6p63m5ey","subscription_id":"unlimited_energy",
+             "created_at":"2026-10-08T15:26:32+00:00","expire_at":"2026-11-07T15:26:32+00:00",
+             "address":"TAddress","status":"active","external_id":"sub-1",
+             "params":{"address":"TAddress","duration":30,"transactions_limit":0,"activate_address":false}}""";
+
+    @Test
+    void subscriptionPlansKeepTheApiOrder() throws Exception {
+        List<SubscriptionPlan> plans = respond("""
+                {"unlimited_energy":{"id":8,"name":"Unlimited Energy","activation_fee":0,"initial_price":8,
+                                     "price":2.8,"transactions_limit":0,"duration_days":0},
+                 "energy_pack_100":{"id":2,"name":"Energy Pack","activation_fee":"2.0","initial_price":"12.5",
+                                    "price":"1.5","transactions_limit":10,"duration_days":5}}""",
+                TronzapClient::getSubscriptions);
+
+        assertEquals(2, plans.size());
+        SubscriptionPlan unlimited = plans.get(0);
+        assertEquals("unlimited_energy", unlimited.subscriptionId());
+        assertEquals(8, unlimited.id());
+        assertEquals("Unlimited Energy", unlimited.name());
+        assertDecimal("0", unlimited.activationFee());
+        assertDecimal("8", unlimited.initialPrice());
+        assertDecimal("2.8", unlimited.price());
+        assertEquals(0, unlimited.transactionsLimit());
+        assertEquals(0, unlimited.durationDays());
+        SubscriptionPlan pack = plans.get(1);
+        assertEquals("energy_pack_100", pack.subscriptionId());
+        assertEquals(2, pack.id());
+        assertDecimal("2.0", pack.activationFee());
+        assertDecimal("1.5", pack.price());
+        assertEquals(10, pack.transactionsLimit());
+        assertEquals(5, pack.durationDays());
+        assertThrows(UnsupportedOperationException.class, () -> plans.add(null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "[]"})
+    void noSubscriptionPlans(String result) throws Exception {
+        assertTrue(respond(result, TronzapClient::getSubscriptions).isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"plans\"", "42", "true", "{\"unlimited_energy\":\"cheap\"}"})
+    void subscriptionPlansOfTheWrongShape(String result) throws Exception {
+        try (TestServer server = TestServer.start().replyOk(result)) {
+            assertThrows(InvalidResponseException.class, () -> server.client().getSubscriptions());
+        }
+    }
+
+    @Test
+    void startedSubscription() throws Exception {
+        Subscription sub = respond(STARTED_SUBSCRIPTION,
+                client -> client.startSubscription(StartSubscriptionRequest.of("unlimited_energy", "TAddress")));
+
+        assertEquals("01m4e1z3q0r7x225zc6p63m5ey", sub.id());
+        assertEquals("unlimited_energy", sub.subscriptionId());
+        assertEquals("sub-1", sub.externalId().orElseThrow());
+        assertEquals("TAddress", sub.address().orElseThrow());
+        assertEquals(SubscriptionStatus.ACTIVE, sub.status());
+        assertEquals(new SubscriptionParams("TAddress", 30, 0, false), sub.params().orElseThrow());
+        assertEquals(OffsetDateTime.of(2026, 10, 8, 15, 26, 32, 0, ZoneOffset.UTC), sub.createdAt().orElseThrow().value().orElseThrow());
+        assertEquals("2026-11-07T15:26:32+00:00", sub.expireAt().orElseThrow().raw());
+        assertTrue(sub.startedAt().isEmpty());
+        assertTrue(sub.stoppedAt().isEmpty());
+        assertEquals(0, sub.transactionsUsed());
+        assertDecimal("0", sub.totalPrice());
+    }
+
+    @Test
+    void checkedSubscriptionMatchesStarted() throws Exception {
+        Subscription started = respond(STARTED_SUBSCRIPTION,
+                client -> client.startSubscription(StartSubscriptionRequest.of("unlimited_energy", "TAddress")));
+        Subscription checked = respond(STARTED_SUBSCRIPTION,
+                client -> client.checkSubscription(SubscriptionRequest.byId("01m4e1z3q0r7x225zc6p63m5ey")));
+
+        assertEquals(started, checked);
+    }
+
+    @Test
+    void stoppedSubscriptionWithoutAddressOrExpiry() throws Exception {
+        Subscription sub = respond("""
+                {"id":"01m4e1z3q0r7x225zc6p63m5ey","subscription_id":"unlimited_energy",
+                 "created_at":"2026-10-08T15:26:32+00:00","stopped_at":"2026-10-08T15:28:44+00:00",
+                 "status":"stopped","external_id":"sub-1",
+                 "params":{"address":"TAddress","duration":30,"transactions_limit":0,"activate_address":false}}""",
+                client -> client.stopSubscription(SubscriptionRequest.byExternalId("sub-1")));
+
+        assertEquals(SubscriptionStatus.STOPPED, sub.status());
+        assertTrue(sub.address().isEmpty());
+        assertTrue(sub.expireAt().isEmpty());
+        assertEquals("2026-10-08T15:28:44+00:00", sub.stoppedAt().orElseThrow().raw());
+        assertEquals("TAddress", sub.params().orElseThrow().address());
+        assertEquals(30, sub.params().orElseThrow().durationDays());
+    }
+
+    @Test
+    void subscriptionHistory() throws Exception {
+        SubscriptionHistory history = respond("""
+                {"page":1,"per_page":10,"total":1,"items":[
+                 {"id":"01m4e1z3q0r7x225zc6p63m5ey","status":"active","subscription_id":"unlimited_energy",
+                  "address":"TAddress","transactions_limit":0,"transactions_used":4,"energy_used":262000,
+                  "total_price":13.6,"started_at":"2026-10-08T15:26:33+00:00","renewed_at":"2026-10-08T15:27:35+00:00",
+                  "stopped_at":null,"expire_at":"2026-11-07T15:26:32+00:00","created_at":"2026-10-08T15:26:32+00:00"}]}""",
+                TronzapClient::getSubscriptionHistory);
+
+        assertEquals(1, history.page());
+        assertEquals(10, history.perPage());
+        assertEquals(1, history.total());
+        Subscription sub = history.items().get(0);
+        assertEquals(SubscriptionStatus.ACTIVE, sub.status());
+        assertEquals("TAddress", sub.address().orElseThrow());
+        assertTrue(sub.params().isEmpty());
+        assertTrue(sub.externalId().isEmpty());
+        assertEquals(0, sub.transactionsLimit());
+        assertEquals(4, sub.transactionsUsed());
+        assertEquals(262000, sub.energyUsed());
+        assertDecimal("13.6", sub.totalPrice());
+        assertEquals("2026-10-08T15:26:33+00:00", sub.startedAt().orElseThrow().raw());
+        assertEquals("2026-10-08T15:27:35+00:00", sub.renewedAt().orElseThrow().raw());
+        assertTrue(sub.stoppedAt().isEmpty());
+        assertTrue(sub.expireAt().isPresent());
+    }
+
+    @Test
+    void subscriptionTotalPriceAsStringAndUnknownStatus() throws Exception {
+        SubscriptionHistory history = respond("""
+                {"page":1,"per_page":10,"total":1,
+                 "items":[{"id":"sub-2","status":"paused","total_price":"8.00","future_field":{"nested":[1]}}]}""",
+                TronzapClient::getSubscriptionHistory);
+
+        Subscription sub = history.items().get(0);
+        assertEquals(new BigDecimal("8.00"), sub.totalPrice());
+        assertEquals(SubscriptionStatus.UNKNOWN, sub.status());
     }
 }

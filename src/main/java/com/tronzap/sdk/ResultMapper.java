@@ -14,6 +14,8 @@ import com.tronzap.sdk.model.DirectRechargeRate;
 import com.tronzap.sdk.model.EnergyRate;
 import com.tronzap.sdk.model.Resources;
 import com.tronzap.sdk.model.Service;
+import com.tronzap.sdk.model.SubscriptionParams;
+import com.tronzap.sdk.model.SubscriptionStatus;
 import com.tronzap.sdk.model.Timestamp;
 import com.tronzap.sdk.model.TransactionParams;
 import com.tronzap.sdk.model.TransactionStatus;
@@ -26,6 +28,9 @@ import com.tronzap.sdk.response.Calculation;
 import com.tronzap.sdk.response.DirectRechargeInfo;
 import com.tronzap.sdk.response.EnergyEstimate;
 import com.tronzap.sdk.response.Services;
+import com.tronzap.sdk.response.Subscription;
+import com.tronzap.sdk.response.SubscriptionHistory;
+import com.tronzap.sdk.response.SubscriptionPlan;
 import com.tronzap.sdk.response.Transaction;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -144,6 +149,69 @@ final class ResultMapper {
                 int32(o, "per_page"),
                 int32(o, "total"),
                 list(o, "items", ResultMapper::amlCheck));
+    }
+
+    /** Plans arrive keyed by plan identifier; an empty set is encoded by PHP as {@code []}. */
+    static List<SubscriptionPlan> subscriptionPlans(JsonNode node) {
+        if (node != null && node.isArray()) {
+            return elements(node, "result", item -> subscriptionPlan("", item));
+        }
+        if (node == null || !node.isObject()) {
+            throw new MappingException("result is not an object");
+        }
+        List<SubscriptionPlan> plans = new ArrayList<>(node.size());
+        for (Map.Entry<String, JsonNode> entry : node.properties()) {
+            plans.add(subscriptionPlan(entry.getKey(), entry.getValue()));
+        }
+        return Collections.unmodifiableList(plans);
+    }
+
+    static Subscription subscription(JsonNode node) {
+        JsonNode o = object(node, "subscription");
+        JsonNode params = o.get("params");
+        return new Subscription(
+                text(o, "id"),
+                text(o, "subscription_id"),
+                optionalText(o, "external_id"),
+                optionalText(o, "address"),
+                SubscriptionStatus.fromValue(text(o, "status")),
+                isAbsent(params) ? Optional.empty() : Optional.of(subscriptionParams(object(params, "params"))),
+                integer(o, "transactions_limit"),
+                integer(o, "transactions_used"),
+                integer(o, "energy_used"),
+                decimal(o, "total_price"),
+                timestamp(o, "created_at"),
+                timestamp(o, "started_at"),
+                timestamp(o, "renewed_at"),
+                timestamp(o, "stopped_at"),
+                timestamp(o, "expire_at"));
+    }
+
+    static SubscriptionHistory subscriptionHistory(JsonNode node) {
+        JsonNode o = object(node, "result");
+        return new SubscriptionHistory(
+                int32(o, "page"),
+                int32(o, "per_page"),
+                int32(o, "total"),
+                list(o, "items", ResultMapper::subscription));
+    }
+
+    private static SubscriptionPlan subscriptionPlan(String key, JsonNode node) {
+        JsonNode o = object(node, "subscription plan");
+        return new SubscriptionPlan(
+                key,
+                integer(o, "id"),
+                text(o, "name"),
+                decimal(o, "activation_fee"),
+                decimal(o, "initial_price"),
+                decimal(o, "price"),
+                integer(o, "transactions_limit"),
+                int32(o, "duration_days"));
+    }
+
+    private static SubscriptionParams subscriptionParams(JsonNode o) {
+        return new SubscriptionParams(
+                text(o, "address"), int32(o, "duration"), integer(o, "transactions_limit"), bool(o, "activate_address"));
     }
 
     private static TransactionParams transactionParams(JsonNode o, Service service) {

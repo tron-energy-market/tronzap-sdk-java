@@ -19,6 +19,9 @@ import com.tronzap.sdk.request.CheckTransactionRequest;
 import com.tronzap.sdk.request.EnergyTransactionRequest;
 import com.tronzap.sdk.request.EstimateEnergyRequest;
 import com.tronzap.sdk.request.ResourceBundleTransactionRequest;
+import com.tronzap.sdk.request.StartSubscriptionRequest;
+import com.tronzap.sdk.request.SubscriptionHistoryRequest;
+import com.tronzap.sdk.request.SubscriptionRequest;
 import com.tronzap.sdk.response.AddressInfo;
 import com.tronzap.sdk.response.AmlCheck;
 import com.tronzap.sdk.response.AmlHistory;
@@ -28,6 +31,9 @@ import com.tronzap.sdk.response.Calculation;
 import com.tronzap.sdk.response.DirectRechargeInfo;
 import com.tronzap.sdk.response.EnergyEstimate;
 import com.tronzap.sdk.response.Services;
+import com.tronzap.sdk.response.Subscription;
+import com.tronzap.sdk.response.SubscriptionHistory;
+import com.tronzap.sdk.response.SubscriptionPlan;
 import com.tronzap.sdk.response.Transaction;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -49,7 +55,7 @@ import java.util.function.Function;
 
 /**
  * Client for the <a href="https://docs.tronzap.com/">TronZap API</a>: buy TRON energy and bandwidth,
- * activate addresses and run AML checks.
+ * activate addresses, manage energy subscriptions and run AML checks.
  *
  * <pre>{@code
  * TronzapClient client = TronzapClient.builder()
@@ -345,6 +351,100 @@ public final class TronzapClient {
                 .put("per_page", request.perPage());
         request.status().ifPresent(status -> params.put("status", status.value()));
         return call("/v1/aml-checks/history", params, ResultMapper::amlHistory);
+    }
+
+    /**
+     * Returns the subscription plans on sale, in the order the API lists them.
+     *
+     * @return the plans, possibly empty
+     * @throws TronzapException if the request fails
+     */
+    public List<SubscriptionPlan> getSubscriptions() {
+        return call("/v1/subscriptions", codec.object(), ResultMapper::subscriptionPlans);
+    }
+
+    /**
+     * Subscribes an address to a plan from {@link #getSubscriptions()}. Starting a subscription charges
+     * the plan's initial price.
+     *
+     * <p>Starting a subscription for an address that already has an active one fails with {@link
+     * ApiException} and code {@link com.tronzap.sdk.exception.ApiErrorCode#INVALID_TRON_ADDRESS}.
+     *
+     * @param request the plan, the address and the limits
+     * @return the started subscription
+     * @throws TronzapException if the request fails
+     */
+    public Subscription startSubscription(StartSubscriptionRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object().put("subscription_id", request.subscriptionId());
+        request.externalId().ifPresent(id -> params.put("external_id", id));
+        ObjectNode subscriptionParams = params.putObject("params")
+                .put("address", request.address())
+                .put("duration", request.durationDays())
+                .put("transactions_limit", request.transactionsLimit());
+        if (request.activateAddress()) {
+            subscriptionParams.put("activate_address", true);
+        }
+        return call("/v1/subscription/start", params, ResultMapper::subscription);
+    }
+
+    /**
+     * Returns the current state of a subscription.
+     *
+     * @param request the subscription ID, external ID, or both
+     * @return the subscription
+     * @throws TronzapException if the request fails; an unknown subscription fails with code {@link
+     *     com.tronzap.sdk.exception.ApiErrorCode#TRANSACTION_NOT_FOUND}
+     */
+    public Subscription checkSubscription(SubscriptionRequest request) {
+        return subscriptionCall("/v1/subscription/check", request);
+    }
+
+    /**
+     * Stops a subscription.
+     *
+     * @param request the subscription ID, external ID, or both
+     * @return the stopped subscription
+     * @throws TronzapException if the request fails; a subscription with a transactions limit cannot
+     *     be stopped and fails with code {@link
+     *     com.tronzap.sdk.exception.ApiErrorCode#CANNOT_STOP_SUBSCRIPTION}
+     */
+    public Subscription stopSubscription(SubscriptionRequest request) {
+        return subscriptionCall("/v1/subscription/stop", request);
+    }
+
+    /**
+     * Returns the first page of your subscriptions, ten per page.
+     *
+     * @return the first page of subscriptions
+     * @throws TronzapException if the request fails
+     */
+    public SubscriptionHistory getSubscriptionHistory() {
+        return getSubscriptionHistory(SubscriptionHistoryRequest.firstPage());
+    }
+
+    /**
+     * Returns one page of your subscriptions, newest first.
+     *
+     * @param request the page to return and an optional status filter
+     * @return the page of subscriptions
+     * @throws TronzapException if the request fails
+     */
+    public SubscriptionHistory getSubscriptionHistory(SubscriptionHistoryRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object()
+                .put("page", request.page())
+                .put("per_page", request.perPage());
+        request.status().ifPresent(status -> params.put("status", status.value()));
+        return call("/v1/subscriptions/history", params, ResultMapper::subscriptionHistory);
+    }
+
+    private Subscription subscriptionCall(String endpoint, SubscriptionRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object();
+        request.id().ifPresent(id -> params.put("id", id));
+        request.externalId().ifPresent(externalId -> params.put("external_id", externalId));
+        return call(endpoint, params, ResultMapper::subscription);
     }
 
     private Transaction createTransaction(Service service, ObjectNode transactionParams, Optional<String> externalId) {

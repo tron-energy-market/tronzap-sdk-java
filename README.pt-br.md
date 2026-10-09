@@ -159,12 +159,19 @@ limita a requisição inteira, incluindo um corpo de resposta que chega lentamen
 | `createAmlCheck(request)` | `/v1/aml-checks/new` | Iniciar uma verificação AML |
 | `checkAmlStatus(id)` | `/v1/aml-checks/check` | Status e resultado de uma verificação AML |
 | `getAmlHistory()` / `getAmlHistory(request)` | `/v1/aml-checks/history` | Histórico paginado de verificações AML |
+| `getSubscriptions()` | `/v1/subscriptions` | Planos de assinatura e preços |
+| `startSubscription(request)` | `/v1/subscription/start` | Assinar um plano para um endereço |
+| `checkSubscription(request)` | `/v1/subscription/check` | Status de uma assinatura, por id ou id externo |
+| `stopSubscription(request)` | `/v1/subscription/stop` | Parar uma assinatura |
+| `getSubscriptionHistory()` / `getSubscriptionHistory(request)` | `/v1/subscriptions/history` | Histórico paginado de assinaturas |
 
 Os parâmetros são records imutáveis em `com.tronzap.sdk.request`. Cada um tem uma
 fábrica `of(...)` com os valores obrigatórios, e os que têm vários valores
 opcionais também têm um `builder(...)`. Uma requisição se valida ao ser criada,
 então uma requisição inválida nunca é enviada. Os padrões coincidem com a API:
-`duration` é 1 hora e o histórico AML começa na página 1 com 10 itens.
+`duration` é 1 hora e os históricos AML e de assinaturas começam na página 1 com
+10 itens. A exceção é `StartSubscriptionRequest`, em que `durationDays` ou
+`transactionsLimit` igual a zero significa sem limite.
 
 Os resultados são records imutáveis em `com.tronzap.sdk.response`. As coleções
 nunca são `null`, e os valores que a API pode omitir são `Optional`.
@@ -233,6 +240,39 @@ if (result.status() == AmlStatus.COMPLETED) {
 `riskScore()` fica vazio até a verificação terminar. Uma verificação concluída pode
 ter pontuação 0, o que não é o mesmo que ainda não ter pontuação.
 
+### Assinaturas
+
+Uma assinatura mantém um endereço abastecido de energia para cada transação até
+ser parada ou esgotar seus dias ou transações. Escolha um plano de
+`getSubscriptions()` e passe o seu `subscriptionId()`, como `"unlimited_energy"`,
+não o `id()` numérico. Iniciar uma assinatura cobra o preço inicial do plano.
+
+```java
+List<SubscriptionPlan> plans = client.getSubscriptions();
+for (SubscriptionPlan plan : plans) {
+    System.out.println(plan.subscriptionId() + " " + plan.initialPrice() + " " + plan.price());
+}
+
+Subscription sub = client.startSubscription(
+        StartSubscriptionRequest.builder("unlimited_energy", "TRecipientAddress")
+                .durationDays(30)         // 0 para não limitar o tempo
+                .transactionsLimit(0)     // 0 para não limitar
+                .externalId("subscription-42")
+                .build());
+
+sub = client.checkSubscription(SubscriptionRequest.byExternalId("subscription-42"));
+
+sub = client.stopSubscription(SubscriptionRequest.byId(sub.id()));
+
+SubscriptionHistory history = client.getSubscriptionHistory(
+        SubscriptionHistoryRequest.of(1, 10, SubscriptionStatus.ACTIVE));
+```
+
+Iniciar, consultar e parar retornam a assinatura com seus `params()`; o histórico
+retorna em vez disso os contadores de uso `transactionsUsed()`, `energyUsed()` e
+`totalPrice()`, com `params()` vazio. Uma assinatura com limite de transações não
+pode ser parada (`CANNOT_STOP_SUBSCRIPTION`).
+
 ## Tratamento de erros
 
 Toda falha de uma chamada à API é uma `TronzapException` não verificada
@@ -299,11 +339,11 @@ diferente de zero é sempre informado como `ApiException`, nunca como
 | 2 | `INVALID_SERVICE_OR_PARAMS` | Serviço ou parâmetros inválidos |
 | 5 | `WALLET_NOT_FOUND` | Carteira interna não encontrada. Contate o suporte. |
 | 6 | `INSUFFICIENT_FUNDS` | Saldo insuficiente |
-| 10 | `INVALID_TRON_ADDRESS` | Endereço TRON inválido |
+| 10 | `INVALID_TRON_ADDRESS` | Endereço TRON inválido, ou o endereço já tem uma assinatura ativa |
 | 11 | `INVALID_ENERGY_AMOUNT` | Quantidade de energia inválida |
 | 12 | `INVALID_DURATION` | Duração inválida |
 | 20 | `TRANSACTION_NOT_FOUND` | Transação/assinatura não encontrada |
-| 21 | `CANNOT_STOP_SUBSCRIPTION` | Não é possível interromper a assinatura |
+| 21 | `CANNOT_STOP_SUBSCRIPTION` | Não é possível interromper a assinatura, p. ex. ela tem limite de transações |
 | 24 | `ADDRESS_NOT_ACTIVATED` | Endereço não ativado |
 | 25 | `ADDRESS_ALREADY_ACTIVATED` | Endereço já ativado |
 | 30 | `AML_CHECK_NOT_FOUND` | Verificação AML não encontrada |

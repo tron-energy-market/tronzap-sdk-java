@@ -11,11 +11,14 @@ import com.tronzap.sdk.model.AmlRiskLevel;
 import com.tronzap.sdk.model.AmlStatus;
 import com.tronzap.sdk.model.AmlType;
 import com.tronzap.sdk.model.Service;
+import com.tronzap.sdk.model.SubscriptionStatus;
 import com.tronzap.sdk.model.Timestamp;
 import com.tronzap.sdk.model.TransactionStatus;
 import com.tronzap.sdk.request.AmlHistoryRequest;
 import com.tronzap.sdk.request.CheckTransactionRequest;
 import com.tronzap.sdk.request.EnergyTransactionRequest;
+import com.tronzap.sdk.request.StartSubscriptionRequest;
+import com.tronzap.sdk.request.SubscriptionHistoryRequest;
 import com.tronzap.sdk.response.AmlHistory;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -74,6 +77,12 @@ class ModelTest {
         assertSame(AmlDirection.DEPOSIT, AmlDirection.fromValue("deposit"));
         assertSame(AmlStatus.COMPLETED, AmlStatus.fromValue("completed"));
         assertSame(AmlRiskLevel.HIGH, AmlRiskLevel.fromValue("high"));
+        for (SubscriptionStatus value : SubscriptionStatus.values()) {
+            if (value != SubscriptionStatus.UNKNOWN) {
+                assertSame(value, SubscriptionStatus.fromValue(value.value()));
+            }
+        }
+        assertEquals("expired", SubscriptionStatus.EXPIRED.value());
     }
 
     @Test
@@ -83,6 +92,8 @@ class ModelTest {
         assertSame(Service.UNKNOWN, Service.fromValue(""));
         assertSame(TransactionStatus.UNKNOWN, TransactionStatus.fromValue("SUCCESS"));
         assertSame(AmlRiskLevel.UNKNOWN, AmlRiskLevel.fromValue("critical"));
+        assertSame(SubscriptionStatus.UNKNOWN, SubscriptionStatus.fromValue("paused"));
+        assertSame(SubscriptionStatus.UNKNOWN, SubscriptionStatus.fromValue(null));
     }
 
     @Test
@@ -92,6 +103,7 @@ class ModelTest {
         assertSame(ApiErrorCode.INVALID_BANDWIDTH_AMOUNT, ApiErrorCode.fromCode(50));
         assertSame(ApiErrorCode.UNKNOWN, ApiErrorCode.fromCode(-1));
         assertSame(ApiErrorCode.UNKNOWN, ApiErrorCode.fromCode(0));
+        assertSame(ApiErrorCode.CANNOT_STOP_SUBSCRIPTION, ApiErrorCode.fromCode(21));
         assertEquals(500, ApiErrorCode.INTERNAL_SERVER_ERROR.code());
     }
 
@@ -106,6 +118,17 @@ class ModelTest {
         assertEquals(1, history.page());
         assertEquals(10, history.perPage());
         assertTrue(history.status().isEmpty());
+
+        StartSubscriptionRequest subscription = StartSubscriptionRequest.of("unlimited_energy", "TAddress");
+        SubscriptionHistoryRequest subscriptions = SubscriptionHistoryRequest.firstPage();
+
+        assertEquals(0, subscription.durationDays());
+        assertEquals(0, subscription.transactionsLimit());
+        assertTrue(subscription.externalId().isEmpty());
+        assertEquals(false, subscription.activateAddress());
+        assertEquals(1, subscriptions.page());
+        assertEquals(10, subscriptions.perPage());
+        assertTrue(subscriptions.status().isEmpty());
     }
 
     @Test

@@ -14,6 +14,10 @@ import com.tronzap.sdk.request.CheckTransactionRequest;
 import com.tronzap.sdk.request.EnergyTransactionRequest;
 import com.tronzap.sdk.request.EstimateEnergyRequest;
 import com.tronzap.sdk.request.ResourceBundleTransactionRequest;
+import com.tronzap.sdk.request.StartSubscriptionRequest;
+import com.tronzap.sdk.request.SubscriptionHistoryRequest;
+import com.tronzap.sdk.request.SubscriptionRequest;
+import com.tronzap.sdk.response.Subscription;
 import com.tronzap.sdk.response.Transaction;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -32,12 +36,17 @@ import java.util.Optional;
  * export TRONZAP_TO_ADDRESS=TRON_ADDRESS       # optional, with FROM_ADDRESS
  * export TRONZAP_TRANSACTION_ID=id             # optional
  * export TRONZAP_AML_CHECK_ID=id               # optional
+ * export TRONZAP_SUBSCRIPTION_ID=id            # optional
  * ./mvnw -q test-compile exec:java -Dexec.mainClass=com.tronzap.sdk.example.BasicUsage -Dexec.classpathScope=test
  * </pre>
  *
  * <p>Setting {@code TRONZAP_ALLOW_PURCHASES=1} additionally exercises the endpoints that create
  * transactions and AML checks. Those DEBIT THE ACCOUNT BALANCE. It is meant for verifying an
  * integration against a development environment, and it also needs {@code TRONZAP_ADDRESS}.
+ *
+ * <p>Setting {@code TRONZAP_SUBSCRIPTION_PLAN} as well, for example to {@code unlimited_energy},
+ * starts a one-day subscription to that plan for {@code TRONZAP_ADDRESS} and stops it straight away.
+ * Starting one charges the plan's initial price.
  */
 public final class BasicUsage {
 
@@ -106,6 +115,17 @@ public final class BasicUsage {
             var history = client.getAmlHistory();
             System.out.printf("  page %d, %d of %d check(s)%n", history.page(), history.items().size(), history.total());
         });
+        step("getSubscriptions", () -> client.getSubscriptions().forEach(plan -> System.out.printf(
+                "  %s (%s): activation %s, initial %s, %s per transaction, limit %d transactions, %d days%n",
+                plan.subscriptionId(), plan.name(), plan.activationFee().toPlainString(), plan.initialPrice().toPlainString(),
+                plan.price().toPlainString(), plan.transactionsLimit(), plan.durationDays())));
+        step("getSubscriptionHistory", () -> {
+            var history = client.getSubscriptionHistory(SubscriptionHistoryRequest.of(1, 3));
+            System.out.printf("  page %d, %d of %d subscription(s)%n", history.page(), history.items().size(), history.total());
+            history.items().forEach(sub -> System.out.printf("  %s %s %s, used %d, energy %d, charged %s, expires %s%n",
+                    sub.id(), sub.subscriptionId(), sub.status(), sub.transactionsUsed(), sub.energyUsed(),
+                    sub.totalPrice().toPlainString(), sub.expireAt().map(BasicUsage::describe).orElse("never")));
+        });
 
         Optional<String> address = env("TRONZAP_ADDRESS");
         optionalStep("getAddressInfo", address, value -> {
@@ -131,6 +151,8 @@ public final class BasicUsage {
             var check = client.checkAmlStatus(value);
             System.out.printf("  %s, risk %s%n", check.status(), check.riskScore().map(Object::toString).orElse("not scored yet"));
         });
+        optionalStep("checkSubscription", env("TRONZAP_SUBSCRIPTION_ID"),
+                value -> print(client.checkSubscription(SubscriptionRequest.byId(value))));
     }
 
     private void purchases() {
@@ -166,6 +188,30 @@ public final class BasicUsage {
             var check = client.createAmlCheck(AmlCheckRequest.forAddress("TRX", target));
             System.out.printf("  AML check %s is %s%n", check.id(), check.status());
         });
+        optionalStep("startSubscription, checkSubscription, stopSubscription", env("TRONZAP_SUBSCRIPTION_PLAN"), plan -> {
+            Subscription started = client.startSubscription(StartSubscriptionRequest.builder(plan, target)
+                    .durationDays(1)
+                    .externalId(runId + "-subscription")
+                    .build());
+            TronzapException checkFailure = null;
+            try {
+                print(started);
+                print(client.checkSubscription(SubscriptionRequest.byExternalId(runId + "-subscription")));
+            } catch (TronzapException e) {
+                checkFailure = e;
+            }
+            try {
+                print(client.stopSubscription(SubscriptionRequest.byId(started.id())));
+            } catch (TronzapException e) {
+                if (checkFailure != null) {
+                    e.addSuppressed(checkFailure);
+                }
+                throw e;
+            }
+            if (checkFailure != null) {
+                throw checkFailure;
+            }
+        });
     }
 
     private void step(String name, Runnable call) {
@@ -190,6 +236,14 @@ public final class BasicUsage {
         System.out.printf("  %s %s %s, charged %s, created %s%n",
                 tx.id(), tx.service(), tx.status(), tx.amount().toPlainString(),
                 tx.createdAt().map(BasicUsage::describe).orElse("unknown"));
+    }
+
+    private static void print(Subscription sub) {
+        System.out.printf("  %s %s %s, address %s, created %s, expires %s, stopped %s%n",
+                sub.id(), sub.subscriptionId(), sub.status(), sub.address().orElse("-"),
+                sub.createdAt().map(BasicUsage::describe).orElse("unknown"),
+                sub.expireAt().map(BasicUsage::describe).orElse("-"),
+                sub.stoppedAt().map(BasicUsage::describe).orElse("-"));
     }
 
     private static String describe(Timestamp timestamp) {
