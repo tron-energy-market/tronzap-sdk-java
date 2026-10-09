@@ -20,5 +20,10 @@ updates:
       build:
         patterns: ['*']
         exclude-patterns: ['com.fasterxml.jackson*']
+    ignore:
+      # Maven 3.10 leaves maven-metadata-local.xml in the Central bundle, which Central rejects:
+      # https://github.com/mavenplugins/central-publishing-maven-plugin/issues/79
+      - dependency-name: org.apache.maven:apache-maven
+        versions: ['>= 3.10.0']
     commit-message:
       prefix: chore
