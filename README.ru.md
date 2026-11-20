@@ -165,6 +165,11 @@ TronzapClient client = TronzapClient.builder()
 | `checkSubscription(request)` | `/v1/subscription/check` | Статус подписки по id или внешнему id |
 | `stopSubscription(request)` | `/v1/subscription/stop` | Остановить подписку |
 | `getSubscriptionHistory()` / `getSubscriptionHistory(request)` | `/v1/subscriptions/history` | История подписок с пагинацией |
+| `bulkCalculate(request)` | `/v1/bulk/calculate` | Проверить и рассчитать до 10 000 строк массового заказа энергии |
+| `bulkCreate(request)` | `/v1/bulk/create` | Запустить массовый заказ по расчёту |
+| `bulkCheck(request)` | `/v1/bulk/check` | Статус и прогресс массового заказа по id или внешнему id |
+| `getBulkHistory()` / `getBulkHistory(request)` | `/v1/bulk/history` | История массовых заказов с пагинацией |
+| `bulkReport(request)` | `/v1/bulk/report` | Отчёт массового заказа по адресам в CSV |
 
 Параметры — неизменяемые records в `com.tronzap.sdk.request`. У каждого есть
 фабрика `of(...)` для обязательных значений, а у тех, где несколько
@@ -281,6 +286,56 @@ SubscriptionHistory history = client.getSubscriptionHistory(
 `totalPrice()`, с пустым `params()`. Подписку с лимитом транзакций остановить
 нельзя (`CANNOT_STOP_SUBSCRIPTION`).
 
+### Массовые заказы
+
+Покупка энергии на 10 000 адресов одним заказом. `bulkCalculate` проверяет и
+рассчитывает строки и возвращает расчёт, действительный 10 минут; ничего не
+списывается. Некорректные строки не валят запрос: они возвращаются в `rejected()`
+с номером строки. `bulkCreate` запускает заказ; каждый адрес списывается в момент
+обработки, неактивированные адреса пропускаются без списания.
+
+Если цена изменилась после расчёта, `bulkCreate` не запускает заказ и бросает
+`BulkPriceChangedException` (код `BULK_PRICE_CHANGED`). Его `getCalculation()` —
+новый расчёт: подтвердите новую сумму и запустите его по `id()`.
+
+```java
+BulkCalculation calculation = client.bulkCalculate(BulkCalculateRequest.of(List.of(
+        BulkItem.of("TRecipientAddress1", 65000),
+        BulkItem.of("TRecipientAddress2", 131000))));
+calculation.rejected().forEach(row -> System.out.println(row.row() + " " + row.reason()));
+
+BulkOrder order;
+try {
+    order = client.bulkCreate(BulkCreateRequest.builder(calculation.id())
+            .externalId("order-42")
+            .webhookUrl("https://example.com/tronzap/bulk")
+            .build());
+} catch (BulkPriceChangedException e) {
+    BulkCalculation newCalculation = e.getCalculation(); // подтвердите новую сумму и запустите
+    order = client.bulkCreate(BulkCreateRequest.builder(newCalculation.id()).externalId("order-42").build());
+}
+
+order = client.bulkCheck(BulkOrderRequest.byExternalId("order-42")); // опрашивайте до COMPLETED, PARTIAL или FAILED
+String csv = client.bulkReport(BulkReportRequest.byId(order.id()));  // row,address,amount,status,reason,charged,transaction_id
+BulkHistory history = client.getBulkHistory(BulkHistoryRequest.of(1, 10));
+```
+
+С `webhookUrl` API один раз отправит на него `POST`, когда заказ станет
+финальным. Проверьте заголовок `X-Signature` по сырому телу, прежде чем доверять
+запросу, например в Spring:
+
+```java
+@PostMapping("/tronzap/bulk")
+ResponseEntity<Void> bulkWebhook(@RequestBody byte[] body,
+                                 @RequestHeader(value = "X-Signature", required = false) String signature) {
+    if (!client.verifyWebhookSignature(body, signature)) {
+        return ResponseEntity.status(401).build();
+    }
+    // {"id":"01kb2m5x9qj4v8n3c7d6e5f4g3","external_id":"order-42","status":"partial"}
+    return ResponseEntity.ok().build();
+}
+```
+
 ## Обработка ошибок
 
 Любой сбой вызова API — непроверяемое (unchecked) исключение `TronzapException`.
@@ -289,8 +344,10 @@ SubscriptionHistory history = client.getSubscriptionHistory(
 ```
 TronzapException
 ├── ApiException                  — API ответил ненулевым code
+│   ├── BulkPriceChangedException — код 92, с новым расчётом
+│   └── BulkNoValidItemsException — код 94, с отклонёнными строками
 ├── HttpException                 — ответ не 2xx без payload API
-│   ├── RateLimitException        — HTTP 429
+│   ├── RateLimitException        — HTTP 429 без ответа API
 │   ├── UnauthorizedException     — HTTP 401 или 403
 │   └── ServerException           — HTTP 5xx
 ├── InvalidResponseException      — ответ 2xx, который SDK не смог прочитать
@@ -338,6 +395,22 @@ try {
 часть — с 4xx или 5xx, поэтому читаемый payload с ненулевым кодом всегда
 сообщается как `ApiException`, а не как `HttpException`.
 
+`ApiException.getResult()` — поле `result`, которое API вернул вместе с ошибкой, в
+виде JSON-текста. Данные `BULK_PRICE_CHANGED` и `BULK_NO_VALID_ITEMS` SDK читает в
+`BulkPriceChangedException.getCalculation()` и
+`BulkNoValidItemsException.getRejected()`. Лимит запросов, о котором сообщает API,
+— это `ApiException` с `RATE_LIMITED`; `RateLimitException` — только HTTP 429 без
+ответа API, например от прокси. Обе, как и остальные `HttpException`, содержат
+`getRetryAfter()` — пусто, если сервер не сообщил, сколько ждать:
+
+```java
+} catch (ApiException e) {
+    if (e.getErrorCode() == ApiErrorCode.RATE_LIMITED) {
+        Thread.sleep(e.getRetryAfter().orElse(Duration.ofMinutes(1)).toMillis());
+    }
+}
+```
+
 ### Коды ошибок API
 
 | Код | Константа | Описание |
@@ -356,6 +429,14 @@ try {
 | 30 | `AML_CHECK_NOT_FOUND` | AML-проверка не найдена |
 | 35 | `SERVICE_NOT_AVAILABLE` | Сервис недоступен |
 | 50 | `INVALID_BANDWIDTH_AMOUNT` | Неверное количество bandwidth |
+| 90 | `BULK_NOT_FOUND` | Массовый заказ не найден |
+| 91 | `BULK_EXPIRED` | Расчёт истёк, рассчитайте заново |
+| 92 | `BULK_PRICE_CHANGED` | Цена изменилась; новый расчёт в `BulkPriceChangedException` |
+| 93 | `BULK_TOO_MANY_ITEMS` | Больше 10 000 строк |
+| 94 | `BULK_NO_VALID_ITEMS` | Нет корректных строк; они в `BulkNoValidItemsException` |
+| 95 | `BULK_RESOURCE_NOT_SUPPORTED` | Массово можно заказать только энергию |
+| 96 | `PAYLOAD_TOO_LARGE` | Слишком большое тело запроса (HTTP 413) |
+| 429 | `RATE_LIMITED` | Слишком много запросов; подождите `getRetryAfter()`, если указано |
 | 500 | `INTERNAL_SERVER_ERROR` | Внутренняя ошибка сервера: обратитесь в поддержку |
 
 Константы — значения enum `ApiErrorCode`. Код, который эта версия SDK не знает,

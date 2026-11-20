@@ -56,6 +56,39 @@ public enum ApiErrorCode {
     /** Invalid bandwidth amount. */
     INVALID_BANDWIDTH_AMOUNT(50),
 
+    /** Bulk order not found: check the ID or external ID. */
+    BULK_NOT_FOUND(90),
+
+    /** The bulk calculation expired: calculate the order again. */
+    BULK_EXPIRED(91),
+
+    /**
+     * The price changed since the bulk calculation, so the order was not started. The new calculation
+     * arrives in {@link BulkPriceChangedException}: confirm the new total, then start the order with
+     * its ID.
+     */
+    BULK_PRICE_CHANGED(92),
+
+    /** Too many rows in a bulk order: send at most 10 000. */
+    BULK_TOO_MANY_ITEMS(93),
+
+    /**
+     * No row of a bulk order is valid. The rejected rows arrive in {@link BulkNoValidItemsException}.
+     */
+    BULK_NO_VALID_ITEMS(94),
+
+    /** The resource is not supported in bulk orders. */
+    BULK_RESOURCE_NOT_SUPPORTED(95),
+
+    /** The request body is too large. */
+    PAYLOAD_TOO_LARGE(96),
+
+    /**
+     * Too many requests: wait for {@link ApiException#getRetryAfter()}, if the API sent it, before
+     * retrying.
+     */
+    RATE_LIMITED(429),
+
     /** Internal server error. Contact support if it persists. */
     INTERNAL_SERVER_ERROR(500),
 

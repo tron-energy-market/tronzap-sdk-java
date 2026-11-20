@@ -10,6 +10,8 @@ import com.tronzap.sdk.model.AmlStatus;
 import com.tronzap.sdk.model.AmlType;
 import com.tronzap.sdk.model.Amounts;
 import com.tronzap.sdk.model.BandwidthRate;
+import com.tronzap.sdk.model.BulkRejectedRow;
+import com.tronzap.sdk.model.BulkStatus;
 import com.tronzap.sdk.model.DirectRechargeRate;
 import com.tronzap.sdk.model.EnergyRate;
 import com.tronzap.sdk.model.Resources;
@@ -24,6 +26,9 @@ import com.tronzap.sdk.response.AmlCheck;
 import com.tronzap.sdk.response.AmlHistory;
 import com.tronzap.sdk.response.AmlService;
 import com.tronzap.sdk.response.Balance;
+import com.tronzap.sdk.response.BulkCalculation;
+import com.tronzap.sdk.response.BulkHistory;
+import com.tronzap.sdk.response.BulkOrder;
 import com.tronzap.sdk.response.Calculation;
 import com.tronzap.sdk.response.DirectRechargeInfo;
 import com.tronzap.sdk.response.EnergyEstimate;
@@ -196,6 +201,64 @@ final class ResultMapper {
                 list(o, "items", ResultMapper::subscription));
     }
 
+    static BulkCalculation bulkCalculation(JsonNode node) {
+        JsonNode o = object(node, "bulk calculation");
+        return new BulkCalculation(
+                text(o, "id"),
+                BulkStatus.fromValue(text(o, "status")),
+                text(o, "resource"),
+                int32(o, "duration"),
+                decimal(o, "total_amount"),
+                int32(o, "accepted"),
+                int32(o, "rejected_count"),
+                bulkRejectedRows(o),
+                timestamp(o, "expires_at"));
+    }
+
+    static List<BulkRejectedRow> bulkRejectedRows(JsonNode o) {
+        return list(o, "rejected", ResultMapper::bulkRejectedRow);
+    }
+
+    static BulkOrder bulkOrder(JsonNode node) {
+        JsonNode o = object(node, "bulk order");
+        return new BulkOrder(
+                text(o, "id"),
+                optionalText(o, "external_id"),
+                BulkStatus.fromValue(text(o, "status")),
+                text(o, "resource"),
+                int32(o, "duration"),
+                bool(o, "force"),
+                int32(o, "max_price_increase"),
+                optionalText(o, "webhook_url"),
+                int32(o, "total"),
+                int32(o, "processed"),
+                int32(o, "delivered"),
+                int32(o, "failed"),
+                int32(o, "in_review"),
+                int32(o, "skipped"),
+                intMap(o, "skipped_by_reason"),
+                int32(o, "rejected_count"),
+                decimal(o, "total_amount"),
+                decimal(o, "charged_amount"),
+                timestamp(o, "created_at"),
+                timestamp(o, "started_at"),
+                timestamp(o, "finalized_at"));
+    }
+
+    static BulkHistory bulkHistory(JsonNode node) {
+        JsonNode o = object(node, "result");
+        return new BulkHistory(
+                int32(o, "page"),
+                int32(o, "per_page"),
+                int32(o, "total"),
+                list(o, "items", ResultMapper::bulkOrder));
+    }
+
+    private static BulkRejectedRow bulkRejectedRow(JsonNode node) {
+        JsonNode o = object(node, "rejected row");
+        return new BulkRejectedRow(int32(o, "row"), text(o, "address"), text(o, "reason"));
+    }
+
     private static SubscriptionPlan subscriptionPlan(String key, JsonNode node) {
         JsonNode o = object(node, "subscription plan");
         return new SubscriptionPlan(
@@ -311,6 +374,15 @@ final class ResultMapper {
         Map<String, BigDecimal> values = new LinkedHashMap<>();
         for (Map.Entry<String, JsonNode> entry : node.properties()) {
             values.put(entry.getKey(), toDecimal(entry.getValue(), field + "." + entry.getKey()));
+        }
+        return values;
+    }
+
+    private static Map<String, Integer> intMap(JsonNode o, String field) {
+        JsonNode node = object(o.get(field), field);
+        Map<String, Integer> values = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> entry : node.properties()) {
+            values.put(entry.getKey(), int32(node, entry.getKey()));
         }
         return values;
     }

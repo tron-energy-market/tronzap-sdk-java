@@ -105,6 +105,14 @@ class ModelTest {
         assertSame(ApiErrorCode.UNKNOWN, ApiErrorCode.fromCode(0));
         assertSame(ApiErrorCode.CANNOT_STOP_SUBSCRIPTION, ApiErrorCode.fromCode(21));
         assertEquals(500, ApiErrorCode.INTERNAL_SERVER_ERROR.code());
+        assertSame(ApiErrorCode.BULK_NOT_FOUND, ApiErrorCode.fromCode(90));
+        assertSame(ApiErrorCode.BULK_EXPIRED, ApiErrorCode.fromCode(91));
+        assertSame(ApiErrorCode.BULK_PRICE_CHANGED, ApiErrorCode.fromCode(92));
+        assertSame(ApiErrorCode.BULK_TOO_MANY_ITEMS, ApiErrorCode.fromCode(93));
+        assertSame(ApiErrorCode.BULK_NO_VALID_ITEMS, ApiErrorCode.fromCode(94));
+        assertSame(ApiErrorCode.BULK_RESOURCE_NOT_SUPPORTED, ApiErrorCode.fromCode(95));
+        assertSame(ApiErrorCode.PAYLOAD_TOO_LARGE, ApiErrorCode.fromCode(96));
+        assertSame(ApiErrorCode.RATE_LIMITED, ApiErrorCode.fromCode(429));
     }
 
     @Test

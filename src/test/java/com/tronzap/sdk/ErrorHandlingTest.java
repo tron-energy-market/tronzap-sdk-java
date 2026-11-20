@@ -16,12 +16,23 @@ import com.tronzap.sdk.exception.TronzapException;
 import com.tronzap.sdk.exception.UnauthorizedException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.time.Duration;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class ErrorHandlingTest {
+
+    private static TronzapException failure(int status, String body, Map<String, String> headers) throws IOException {
+        try (TestServer server = TestServer.start().reply(status, body, headers)) {
+            return assertThrows(TronzapException.class, () -> server.client().getBalance());
+        }
+    }
 
     private static TronzapException failure(int status, String body) throws IOException {
         try (TestServer server = TestServer.start().reply(status, body)) {
@@ -247,5 +258,95 @@ class ErrorHandlingTest {
             assertTrue(e.getMessage().contains("exceeds"), e.getMessage());
             assertEquals(200, e.getStatusCode());
         }
+    }
+
+    @Test
+    void apiErrorKeepsTheResult() throws Exception {
+        ApiException e = assertInstanceOf(ApiException.class,
+                failure(200, "{\"code\":35,\"error\":\"Unavailable\",\"result\":{\"service\":\"energy\",\"ids\":[1,2]}}"));
+
+        assertEquals("{\"service\":\"energy\",\"ids\":[1,2]}", e.getResult().orElseThrow());
+        assertTrue(e.getRetryAfter().isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"code\":6,\"error\":\"x\"}", "{\"code\":6,\"error\":\"x\",\"result\":null}"})
+    void apiErrorWithoutResult(String body) throws Exception {
+        assertTrue(assertInstanceOf(ApiException.class, failure(200, body)).getResult().isEmpty());
+    }
+
+    @Test
+    void apiRateLimitIsAnApiErrorWithRetryAfter() throws Exception {
+        ApiException e = assertInstanceOf(ApiException.class, failure(429,
+                "{\"code\":429,\"key\":\"rate_limited\",\"error\":\"Too many requests\",\"retry_after\":7}",
+                Map.of("Retry-After", "12")));
+
+        assertSame(ApiErrorCode.RATE_LIMITED, e.getErrorCode());
+        assertEquals(Duration.ofSeconds(12), e.getRetryAfter().orElseThrow());
+    }
+
+    @Test
+    void retryAfterFallsBackToTheBodyField() throws Exception {
+        String body = "{\"code\":429,\"error\":\"Too many requests\",\"retry_after\":7}";
+
+        assertEquals(Duration.ofSeconds(7), assertInstanceOf(ApiException.class, failure(429, body)).getRetryAfter().orElseThrow());
+        assertEquals(Duration.ofSeconds(7), assertInstanceOf(ApiException.class,
+                failure(429, body, Map.of("Retry-After", "soon"))).getRetryAfter().orElseThrow());
+        assertEquals(Duration.ofSeconds(7), assertInstanceOf(ApiException.class,
+                failure(429, body, Map.of("Retry-After", "99999999999999999999"))).getRetryAfter().orElseThrow());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-1", "1.5", "\"7\"", "true", "null", "99999999999999999999"})
+    void invalidRetryAfterFieldIsIgnored(String value) throws Exception {
+        ApiException e = assertInstanceOf(ApiException.class,
+                failure(429, "{\"code\":429,\"error\":\"x\",\"retry_after\":" + value + "}"));
+
+        assertTrue(e.getRetryAfter().isEmpty());
+    }
+
+    @Test
+    void retryAfterAsAnHttpDate() throws Exception {
+        String future = DateTimeFormatter.RFC_1123_DATE_TIME.format(ZonedDateTime.now(ZoneOffset.UTC).plusSeconds(120));
+        String past = "Wed, 21 Oct 2015 07:28:00 GMT";
+        String body = "{\"code\":429,\"error\":\"x\"}";
+
+        Duration wait = assertInstanceOf(ApiException.class, failure(429, body, Map.of("Retry-After", future)))
+                .getRetryAfter().orElseThrow();
+        assertTrue(wait.compareTo(Duration.ofSeconds(110)) > 0 && wait.compareTo(Duration.ofSeconds(121)) <= 0, wait.toString());
+        assertEquals(Duration.ZERO, assertInstanceOf(ApiException.class, failure(429, body, Map.of("Retry-After", past)))
+                .getRetryAfter().orElseThrow());
+    }
+
+    @Test
+    void httpRateLimitWithoutApiPayloadHasRetryAfter() throws Exception {
+        RateLimitException e = assertInstanceOf(RateLimitException.class,
+                failure(429, "slow down", Map.of("Retry-After", "30")));
+
+        assertEquals(Duration.ofSeconds(30), e.getRetryAfter().orElseThrow());
+        assertTrue(assertInstanceOf(RateLimitException.class, failure(429, "slow down")).getRetryAfter().isEmpty());
+    }
+
+    @Test
+    void serviceUnavailableHasRetryAfter() throws Exception {
+        ServerException e = assertInstanceOf(ServerException.class,
+                failure(503, "maintenance", Map.of("Retry-After", "120")));
+
+        assertEquals(Duration.ofMinutes(2), e.getRetryAfter().orElseThrow());
+    }
+
+    @Test
+    void otherHttpErrorsReadTheRetryAfterField() throws Exception {
+        HttpException e = assertInstanceOf(HttpException.class, failure(418, "{\"code\":0,\"retry_after\":5}"));
+
+        assertEquals(Duration.ofSeconds(5), e.getRetryAfter().orElseThrow());
+    }
+
+    @Test
+    void exceptionsBuiltWithoutTheNewValuesHaveNone() {
+        assertTrue(new ApiException("x", 6, null, null, 200, "").getResult().isEmpty());
+        assertTrue(new ApiException("x", 6, null, null, 200, "").getRetryAfter().isEmpty());
+        assertTrue(new RateLimitException("x", 429, "").getRetryAfter().isEmpty());
+        assertTrue(new ServerException("x", 503, "").getRetryAfter().isEmpty());
     }
 }

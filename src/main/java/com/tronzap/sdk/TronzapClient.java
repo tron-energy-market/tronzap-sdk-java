@@ -1,6 +1,7 @@
 package com.tronzap.sdk;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tronzap.sdk.exception.ApiException;
 import com.tronzap.sdk.exception.HttpException;
@@ -16,6 +17,12 @@ import com.tronzap.sdk.request.AddressActivationRequest;
 import com.tronzap.sdk.request.AmlCheckRequest;
 import com.tronzap.sdk.request.AmlHistoryRequest;
 import com.tronzap.sdk.request.BandwidthTransactionRequest;
+import com.tronzap.sdk.request.BulkCalculateRequest;
+import com.tronzap.sdk.request.BulkCreateRequest;
+import com.tronzap.sdk.request.BulkHistoryRequest;
+import com.tronzap.sdk.request.BulkItem;
+import com.tronzap.sdk.request.BulkOrderRequest;
+import com.tronzap.sdk.request.BulkReportRequest;
 import com.tronzap.sdk.request.CalculateRequest;
 import com.tronzap.sdk.request.CheckTransactionRequest;
 import com.tronzap.sdk.request.EnergyTransactionRequest;
@@ -29,6 +36,9 @@ import com.tronzap.sdk.response.AmlCheck;
 import com.tronzap.sdk.response.AmlHistory;
 import com.tronzap.sdk.response.AmlService;
 import com.tronzap.sdk.response.Balance;
+import com.tronzap.sdk.response.BulkCalculation;
+import com.tronzap.sdk.response.BulkHistory;
+import com.tronzap.sdk.response.BulkOrder;
 import com.tronzap.sdk.response.Calculation;
 import com.tronzap.sdk.response.DirectRechargeInfo;
 import com.tronzap.sdk.response.EnergyEstimate;
@@ -46,6 +56,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -57,7 +68,7 @@ import java.util.function.Function;
 
 /**
  * Client for the <a href="https://docs.tronzap.com/">TronZap API</a>: buy TRON energy and bandwidth,
- * activate addresses, manage energy subscriptions and run AML checks.
+ * activate addresses, place bulk energy orders, manage energy subscriptions and run AML checks.
  *
  * <pre>{@code
  * TronzapClient client = TronzapClient.builder()
@@ -446,6 +457,152 @@ public final class TronzapClient {
         return call("/v1/subscriptions/history", params, ResultMapper::subscriptionHistory);
     }
 
+    /**
+     * Validates and prices the rows of a bulk energy order. Nothing is charged, and the calculation is
+     * valid for 10 minutes. Invalid rows do not fail the request: they come back in {@link
+     * BulkCalculation#rejected()} with their row number. When no row is valid, the request fails with
+     * {@link com.tronzap.sdk.exception.BulkNoValidItemsException}.
+     *
+     * @param request the rows and the rental duration
+     * @return the calculation; start it with {@link #bulkCreate(BulkCreateRequest)}
+     * @throws TronzapException if the request fails
+     */
+    public BulkCalculation bulkCalculate(BulkCalculateRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object()
+                .put("resource", Service.ENERGY.value())
+                .put("duration", request.duration());
+        ArrayNode items = params.putArray("items");
+        for (BulkItem item : request.items()) {
+            items.addObject().put("address", item.address()).put("amount", item.amount());
+        }
+        return call("/v1/bulk/calculate", params, ResultMapper::bulkCalculation);
+    }
+
+    /**
+     * Starts a bulk order from a calculation. Nothing is charged here: each address is charged when it
+     * is processed, and an address that is not activated is skipped without a charge. Starting an
+     * order again with the same calculation ID or external ID returns the order already started.
+     *
+     * <p>If the price of any row changed since the calculation, the order is not started and the
+     * request fails with {@link com.tronzap.sdk.exception.BulkPriceChangedException}: confirm the new
+     * total of its calculation, then start the order with the new calculation ID.
+     *
+     * @param request the calculation ID and the order options
+     * @return the started order
+     * @throws TronzapException if the request fails
+     */
+    public BulkOrder bulkCreate(BulkCreateRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object().put("id", request.id());
+        if (request.force()) {
+            params.put("force", true);
+        }
+        request.maxPriceIncrease().ifPresent(percent -> params.put("max_price_increase", percent));
+        request.webhookUrl().ifPresent(url -> params.put("webhook_url", url));
+        request.externalId().ifPresent(id -> params.put("external_id", id));
+        return call("/v1/bulk/create", params, ResultMapper::bulkOrder);
+    }
+
+    /**
+     * Returns the status and progress counters of a bulk order.
+     *
+     * @param request the order ID, external ID, or both
+     * @return the order
+     * @throws TronzapException if the request fails; an unknown order fails with code {@link
+     *     com.tronzap.sdk.exception.ApiErrorCode#BULK_NOT_FOUND}
+     */
+    public BulkOrder bulkCheck(BulkOrderRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object();
+        request.id().ifPresent(id -> params.put("id", id));
+        request.externalId().ifPresent(externalId -> params.put("external_id", externalId));
+        return call("/v1/bulk/check", params, ResultMapper::bulkOrder);
+    }
+
+    /**
+     * Returns the first page of your bulk orders, ten per page.
+     *
+     * @return the first page of bulk orders
+     * @throws TronzapException if the request fails
+     */
+    public BulkHistory getBulkHistory() {
+        return getBulkHistory(BulkHistoryRequest.firstPage());
+    }
+
+    /**
+     * Returns one page of your bulk orders, newest first.
+     *
+     * @param request the page to return
+     * @return the page of bulk orders
+     * @throws TronzapException if the request fails
+     */
+    public BulkHistory getBulkHistory(BulkHistoryRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object()
+                .put("page", request.page())
+                .put("per_page", request.perPage());
+        return call("/v1/bulk/history", params, ResultMapper::bulkHistory);
+    }
+
+    /**
+     * Downloads the per-address report of a bulk order as CSV with a header line. The columns are
+     * {@code row}, {@code address}, {@code amount}, {@code status}, {@code reason}, {@code charged} and
+     * {@code transaction_id}; rows rejected by the calculation are not included.
+     *
+     * @param request the order ID or external ID, and an optional result to keep
+     * @return the CSV report
+     * @throws TronzapException if the request fails
+     */
+    public String bulkReport(BulkReportRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode params = codec.object();
+        request.id().ifPresent(id -> params.put("id", id));
+        request.externalId().ifPresent(externalId -> params.put("external_id", externalId));
+        request.status().ifPresent(status -> params.put("status", status.value()));
+
+        HttpResponse<byte[]> response = post("/v1/bulk/report", params);
+        int status = response.statusCode();
+        String contentType = response.headers().firstValue("Content-Type").orElse("").toLowerCase(Locale.ROOT);
+        if (status >= 200 && status < 300 && contentType.startsWith("text/csv")) {
+            return new String(response.body(), StandardCharsets.UTF_8);
+        }
+        codec.decode(status, response.headers(), response.body());
+        throw new InvalidResponseException(
+                "expected a CSV report", status, new String(response.body(), StandardCharsets.UTF_8), null);
+    }
+
+    /**
+     * Checks the {@code X-Signature} header of a bulk order webhook. The body is a JSON object with the
+     * order's {@code id}, {@code external_id} and {@code status}.
+     *
+     * @param body the raw request body exactly as received
+     * @param signature the value of the {@code X-Signature} header, may be {@code null}
+     * @return whether the signature matches the body and your API secret
+     */
+    public boolean verifyWebhookSignature(byte[] body, String signature) {
+        Objects.requireNonNull(body, "body");
+        if (signature == null) {
+            return false;
+        }
+        byte[] expected = sign(body).getBytes(StandardCharsets.US_ASCII);
+        byte[] actual = signature.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(expected, actual);
+    }
+
+    /**
+     * Checks the {@code X-Signature} header of a bulk order webhook whose body was read as text.
+     *
+     * @param body the raw request body exactly as received
+     * @param signature the value of the {@code X-Signature} header, may be {@code null}
+     * @return whether the signature matches the body and your API secret
+     * @see #verifyWebhookSignature(byte[], String)
+     */
+    public boolean verifyWebhookSignature(String body, String signature) {
+        Objects.requireNonNull(body, "body");
+        return verifyWebhookSignature(body.getBytes(StandardCharsets.UTF_8), signature);
+    }
+
     private Subscription subscriptionCall(String endpoint, SubscriptionRequest request) {
         Objects.requireNonNull(request, "request");
         ObjectNode params = codec.object();
@@ -462,6 +619,20 @@ public final class TronzapClient {
     }
 
     private <T> T call(String endpoint, ObjectNode params, Function<JsonNode, T> mapper) {
+        HttpResponse<byte[]> response = post(endpoint, params);
+        JsonNode result = codec.decode(response.statusCode(), response.headers(), response.body());
+        try {
+            return mapper.apply(result);
+        } catch (ResultMapper.MappingException e) {
+            throw new InvalidResponseException(
+                    "unexpected result in response: " + e.getMessage(),
+                    response.statusCode(),
+                    new String(response.body(), StandardCharsets.UTF_8),
+                    e);
+        }
+    }
+
+    private HttpResponse<byte[]> post(String endpoint, ObjectNode params) {
         byte[] body = codec.write(params);
         HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + endpoint))
                 .timeout(timeout)
@@ -472,18 +643,7 @@ public final class TronzapClient {
                 .header("User-Agent", userAgent)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
-
-        HttpResponse<byte[]> response = send(request);
-        JsonNode result = codec.decode(response.statusCode(), response.body());
-        try {
-            return mapper.apply(result);
-        } catch (ResultMapper.MappingException e) {
-            throw new InvalidResponseException(
-                    "unexpected result in response: " + e.getMessage(),
-                    response.statusCode(),
-                    new String(response.body(), StandardCharsets.UTF_8),
-                    e);
-        }
+        return send(request);
     }
 
     /**

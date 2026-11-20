@@ -4,11 +4,18 @@ import com.tronzap.sdk.TronzapClient;
 import com.tronzap.sdk.TronzapClientBuilder;
 import com.tronzap.sdk.exception.ApiErrorCode;
 import com.tronzap.sdk.exception.ApiException;
+import com.tronzap.sdk.exception.BulkPriceChangedException;
 import com.tronzap.sdk.exception.TronzapException;
 import com.tronzap.sdk.model.Timestamp;
 import com.tronzap.sdk.request.AddressActivationRequest;
 import com.tronzap.sdk.request.AmlCheckRequest;
 import com.tronzap.sdk.request.BandwidthTransactionRequest;
+import com.tronzap.sdk.request.BulkCalculateRequest;
+import com.tronzap.sdk.request.BulkCreateRequest;
+import com.tronzap.sdk.request.BulkHistoryRequest;
+import com.tronzap.sdk.request.BulkItem;
+import com.tronzap.sdk.request.BulkOrderRequest;
+import com.tronzap.sdk.request.BulkReportRequest;
 import com.tronzap.sdk.request.CalculateRequest;
 import com.tronzap.sdk.request.CheckTransactionRequest;
 import com.tronzap.sdk.request.EnergyTransactionRequest;
@@ -17,6 +24,8 @@ import com.tronzap.sdk.request.ResourceBundleTransactionRequest;
 import com.tronzap.sdk.request.StartSubscriptionRequest;
 import com.tronzap.sdk.request.SubscriptionHistoryRequest;
 import com.tronzap.sdk.request.SubscriptionRequest;
+import com.tronzap.sdk.response.BulkCalculation;
+import com.tronzap.sdk.response.BulkOrder;
 import com.tronzap.sdk.response.Subscription;
 import com.tronzap.sdk.response.Transaction;
 import java.time.Duration;
@@ -37,6 +46,7 @@ import java.util.Optional;
  * export TRONZAP_TRANSACTION_ID=id             # optional
  * export TRONZAP_AML_CHECK_ID=id               # optional
  * export TRONZAP_SUBSCRIPTION_ID=id            # optional
+ * export TRONZAP_BULK_ID=id                    # optional
  * ./mvnw -q test-compile exec:java -Dexec.mainClass=com.tronzap.sdk.example.BasicUsage -Dexec.classpathScope=test
  * </pre>
  *
@@ -47,6 +57,8 @@ import java.util.Optional;
  * <p>Setting {@code TRONZAP_SUBSCRIPTION_PLAN} as well, for example to {@code unlimited_energy},
  * starts a one-day subscription to that plan for {@code TRONZAP_ADDRESS} and stops it straight away.
  * Starting one charges the plan's initial price.
+ *
+ * <p>With purchases allowed, the example also starts a bulk order for {@code TRONZAP_ADDRESS} alone.
  */
 public final class BasicUsage {
 
@@ -126,6 +138,11 @@ public final class BasicUsage {
                     sub.id(), sub.subscriptionId(), sub.status(), sub.transactionsUsed(), sub.energyUsed(),
                     sub.totalPrice().toPlainString(), sub.expireAt().map(BasicUsage::describe).orElse("never")));
         });
+        step("getBulkHistory", () -> {
+            var history = client.getBulkHistory(BulkHistoryRequest.of(1, 3));
+            System.out.printf("  page %d, %d of %d bulk order(s)%n", history.page(), history.items().size(), history.total());
+            history.items().forEach(BasicUsage::print);
+        });
 
         Optional<String> address = env("TRONZAP_ADDRESS");
         optionalStep("getAddressInfo", address, value -> {
@@ -138,6 +155,8 @@ public final class BasicUsage {
             System.out.printf("  %d energy for %dh costs %s%n",
                     calculation.amount(), calculation.duration(), calculation.total().toPlainString());
         });
+        optionalStep("bulkCalculate", address, value -> print(client.bulkCalculate(
+                BulkCalculateRequest.of(List.of(BulkItem.of(value, ENERGY), BulkItem.of("not-an-address", ENERGY))))));
 
         Optional<String> from = env("TRONZAP_FROM_ADDRESS");
         Optional<String> to = env("TRONZAP_TO_ADDRESS");
@@ -153,6 +172,10 @@ public final class BasicUsage {
         });
         optionalStep("checkSubscription", env("TRONZAP_SUBSCRIPTION_ID"),
                 value -> print(client.checkSubscription(SubscriptionRequest.byId(value))));
+        optionalStep("bulkCheck, bulkReport", env("TRONZAP_BULK_ID"), value -> {
+            print(client.bulkCheck(BulkOrderRequest.byId(value)));
+            System.out.print(indent(client.bulkReport(BulkReportRequest.byId(value))));
+        });
     }
 
     private void purchases() {
@@ -187,6 +210,19 @@ public final class BasicUsage {
         step("createAmlCheck", () -> {
             var check = client.createAmlCheck(AmlCheckRequest.forAddress("TRX", target));
             System.out.printf("  AML check %s is %s%n", check.id(), check.status());
+        });
+        step("bulkCalculate, bulkCreate, bulkCheck", () -> {
+            BulkCalculation calculation = client.bulkCalculate(BulkCalculateRequest.of(List.of(BulkItem.of(target, ENERGY))));
+            print(calculation);
+            BulkOrder order;
+            try {
+                order = client.bulkCreate(BulkCreateRequest.builder(calculation.id()).externalId(runId + "-bulk").build());
+            } catch (BulkPriceChangedException e) {
+                print(e.getCalculation());
+                order = client.bulkCreate(BulkCreateRequest.builder(e.getCalculation().id()).externalId(runId + "-bulk").build());
+            }
+            print(order);
+            print(client.bulkCheck(BulkOrderRequest.byExternalId(runId + "-bulk")));
         });
         optionalStep("startSubscription, checkSubscription, stopSubscription", env("TRONZAP_SUBSCRIPTION_PLAN"), plan -> {
             Subscription started = client.startSubscription(StartSubscriptionRequest.builder(plan, target)
@@ -244,6 +280,23 @@ public final class BasicUsage {
                 sub.createdAt().map(BasicUsage::describe).orElse("unknown"),
                 sub.expireAt().map(BasicUsage::describe).orElse("-"),
                 sub.stoppedAt().map(BasicUsage::describe).orElse("-"));
+    }
+
+    private static void print(BulkCalculation calculation) {
+        System.out.printf("  calculation %s: %d accepted, %d rejected, total %s, expires %s%n",
+                calculation.id(), calculation.accepted(), calculation.rejectedCount(), calculation.totalAmount().toPlainString(),
+                calculation.expiresAt().map(BasicUsage::describe).orElse("unknown"));
+        calculation.rejected().forEach(row -> System.out.printf("  rejected row %d %s: %s%n", row.row(), row.address(), row.reason()));
+    }
+
+    private static void print(BulkOrder order) {
+        System.out.printf("  %s %s, %d/%d processed: %d delivered, %d failed, %d in review, %d skipped %s, charged %s%n",
+                order.id(), order.status(), order.processed(), order.total(), order.delivered(), order.failed(),
+                order.inReview(), order.skipped(), order.skippedByReason(), order.chargedAmount().toPlainString());
+    }
+
+    private static String indent(String text) {
+        return text.lines().map(line -> "  " + line + System.lineSeparator()).reduce("", String::concat);
     }
 
     private static String describe(Timestamp timestamp) {

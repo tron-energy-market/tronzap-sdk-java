@@ -1,5 +1,6 @@
 package com.tronzap.sdk.exception;
 
+import java.time.Duration;
 import java.util.Optional;
 
 /**
@@ -17,6 +18,10 @@ import java.util.Optional;
  *     }
  * }
  * }</pre>
+ *
+ * <p>Some errors carry data in {@link #getResult()}. The SDK reads the data of {@link
+ * ApiErrorCode#BULK_PRICE_CHANGED} and {@link ApiErrorCode#BULK_NO_VALID_ITEMS} into the subclasses
+ * {@link BulkPriceChangedException} and {@link BulkNoValidItemsException}.
  */
 public class ApiException extends TronzapException {
 
@@ -32,6 +37,10 @@ public class ApiException extends TronzapException {
     private final int statusCode;
     /** The raw response body. */
     private final String responseBody;
+    /** The {@code result} field as JSON, or {@code null}. */
+    private final String result;
+    /** How long to wait before retrying, or {@code null}. */
+    private final Duration retryAfter;
 
     /**
      * Creates an API exception.
@@ -50,12 +59,38 @@ public class ApiException extends TronzapException {
             String requestId,
             int statusCode,
             String responseBody) {
+        this(message, code, errorKey, requestId, statusCode, responseBody, null, null);
+    }
+
+    /**
+     * Creates an API exception with the data the API sent along with the error.
+     *
+     * @param message the human-readable message from the {@code error} field
+     * @param code the API error code
+     * @param errorKey the machine-readable alias from the {@code key} field, may be {@code null}
+     * @param requestId the API request identifier, may be {@code null}
+     * @param statusCode the HTTP status the payload arrived with
+     * @param responseBody the raw response body
+     * @param result the {@code result} field as JSON, may be {@code null}
+     * @param retryAfter how long to wait before retrying, may be {@code null}
+     */
+    public ApiException(
+            String message,
+            int code,
+            String errorKey,
+            String requestId,
+            int statusCode,
+            String responseBody,
+            String result,
+            Duration retryAfter) {
         super(message);
         this.code = code;
         this.errorKey = errorKey;
         this.requestId = requestId;
         this.statusCode = statusCode;
         this.responseBody = responseBody == null ? "" : responseBody;
+        this.result = result;
+        this.retryAfter = retryAfter;
     }
 
     /**
@@ -111,5 +146,27 @@ public class ApiException extends TronzapException {
      */
     public String getResponseBody() {
         return responseBody;
+    }
+
+    /**
+     * Returns the {@code result} field the API sent along with the error, as JSON. The new calculation
+     * of {@link ApiErrorCode#BULK_PRICE_CHANGED} and the rejected rows of {@link
+     * ApiErrorCode#BULK_NO_VALID_ITEMS} arrive here.
+     *
+     * @return the result as JSON text, or empty when the API sent none
+     */
+    public Optional<String> getResult() {
+        return Optional.ofNullable(result);
+    }
+
+    /**
+     * Returns how long to wait before retrying, from the {@code Retry-After} header (seconds or an
+     * HTTP date) or the {@code retry_after} field. A rate limit reported by the API arrives with code
+     * {@link ApiErrorCode#RATE_LIMITED}.
+     *
+     * @return the wait, or empty when the API sent none
+     */
+    public Optional<Duration> getRetryAfter() {
+        return Optional.ofNullable(retryAfter);
     }
 }

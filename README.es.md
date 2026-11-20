@@ -165,6 +165,11 @@ limita toda la solicitud, incluido un cuerpo de respuesta que llega lentamente.
 | `checkSubscription(request)` | `/v1/subscription/check` | Estado de una suscripción, por id o id externo |
 | `stopSubscription(request)` | `/v1/subscription/stop` | Detener una suscripción |
 | `getSubscriptionHistory()` / `getSubscriptionHistory(request)` | `/v1/subscriptions/history` | Historial paginado de suscripciones |
+| `bulkCalculate(request)` | `/v1/bulk/calculate` | Valida y calcula hasta 10 000 filas de un pedido masivo de energía |
+| `bulkCreate(request)` | `/v1/bulk/create` | Inicia un pedido masivo a partir de un cálculo |
+| `bulkCheck(request)` | `/v1/bulk/check` | Estado y progreso de un pedido masivo, por id o id externo |
+| `getBulkHistory()` / `getBulkHistory(request)` | `/v1/bulk/history` | Historial paginado de pedidos masivos |
+| `bulkReport(request)` | `/v1/bulk/report` | Informe por dirección de un pedido masivo en CSV |
 
 Los parámetros son records inmutables en `com.tronzap.sdk.request`. Cada uno tiene
 una fábrica `of(...)` con los valores obligatorios, y los que tienen varios valores
@@ -284,6 +289,56 @@ historial devuelve en su lugar los contadores de uso `transactionsUsed()`,
 `energyUsed()` y `totalPrice()`, con `params()` vacío. Una suscripción con límite
 de transacciones no se puede detener (`CANNOT_STOP_SUBSCRIPTION`).
 
+### Pedidos masivos
+
+Compre energía para hasta 10 000 direcciones en un solo pedido. `bulkCalculate`
+valida y calcula las filas y devuelve un cálculo válido durante 10 minutos; no se
+cobra nada. Las filas inválidas no hacen fallar la solicitud: se devuelven en
+`rejected()` con su número de fila. `bulkCreate` inicia el pedido; cada dirección
+se cobra al procesarse, y las direcciones no activadas se omiten sin cobro.
+
+Si el precio cambió desde el cálculo, `bulkCreate` no inicia el pedido y lanza
+`BulkPriceChangedException` (código `BULK_PRICE_CHANGED`). Su `getCalculation()`
+es el nuevo cálculo: confirme el nuevo total e inícielo con su `id()`.
+
+```java
+BulkCalculation calculation = client.bulkCalculate(BulkCalculateRequest.of(List.of(
+        BulkItem.of("TRecipientAddress1", 65000),
+        BulkItem.of("TRecipientAddress2", 131000))));
+calculation.rejected().forEach(row -> System.out.println(row.row() + " " + row.reason()));
+
+BulkOrder order;
+try {
+    order = client.bulkCreate(BulkCreateRequest.builder(calculation.id())
+            .externalId("order-42")
+            .webhookUrl("https://example.com/tronzap/bulk")
+            .build());
+} catch (BulkPriceChangedException e) {
+    BulkCalculation newCalculation = e.getCalculation(); // confirme el nuevo total e inícielo
+    order = client.bulkCreate(BulkCreateRequest.builder(newCalculation.id()).externalId("order-42").build());
+}
+
+order = client.bulkCheck(BulkOrderRequest.byExternalId("order-42")); // consulte hasta COMPLETED, PARTIAL o FAILED
+String csv = client.bulkReport(BulkReportRequest.byId(order.id()));  // row,address,amount,status,reason,charged,transaction_id
+BulkHistory history = client.getBulkHistory(BulkHistoryRequest.of(1, 10));
+```
+
+Con `webhookUrl`, la API envía un único `POST` cuando el pedido pasa a un estado
+final. Verifique su cabecera `X-Signature` con el cuerpo sin procesar antes de
+confiar en él, por ejemplo en Spring:
+
+```java
+@PostMapping("/tronzap/bulk")
+ResponseEntity<Void> bulkWebhook(@RequestBody byte[] body,
+                                 @RequestHeader(value = "X-Signature", required = false) String signature) {
+    if (!client.verifyWebhookSignature(body, signature)) {
+        return ResponseEntity.status(401).build();
+    }
+    // {"id":"01kb2m5x9qj4v8n3c7d6e5f4g3","external_id":"order-42","status":"partial"}
+    return ResponseEntity.ok().build();
+}
+```
+
 ## Gestión de errores
 
 Todo fallo de una llamada a la API es una `TronzapException` no comprobada
@@ -292,8 +347,10 @@ Todo fallo de una llamada a la API es una `TronzapException` no comprobada
 ```
 TronzapException
 ├── ApiException                  — la API respondió con un código distinto de cero
+│   ├── BulkPriceChangedException — código 92, con el nuevo cálculo
+│   └── BulkNoValidItemsException — código 94, con las filas rechazadas
 ├── HttpException                 — respuesta no 2xx sin payload de la API
-│   ├── RateLimitException        — HTTP 429
+│   ├── RateLimitException        — HTTP 429 sin respuesta de la API
 │   ├── UnauthorizedException     — HTTP 401 o 403
 │   └── ServerException           — HTTP 5xx
 ├── InvalidResponseException      — respuesta 2xx que el SDK no pudo leer
@@ -343,6 +400,23 @@ algunos fallos con estado 2xx y de otros con 4xx o 5xx, así que un payload legi
 con un código distinto de cero siempre se informa como `ApiException`, nunca como
 `HttpException`.
 
+`ApiException.getResult()` es el `result` que la API envió con el error, como texto
+JSON. El SDK lee los datos de `BULK_PRICE_CHANGED` y `BULK_NO_VALID_ITEMS` en
+`BulkPriceChangedException.getCalculation()` y
+`BulkNoValidItemsException.getRejected()`. Un límite de solicitudes informado por
+la API es un `ApiException` con `RATE_LIMITED`; `RateLimitException` es solo un
+HTTP 429 sin respuesta de la API, p. ej. de un proxy. Ambos, como los demás
+`HttpException`, incluyen `getRetryAfter()`, vacío si el servidor no indicó
+cuánto esperar:
+
+```java
+} catch (ApiException e) {
+    if (e.getErrorCode() == ApiErrorCode.RATE_LIMITED) {
+        Thread.sleep(e.getRetryAfter().orElse(Duration.ofMinutes(1)).toMillis());
+    }
+}
+```
+
 ### Códigos de error de la API
 
 | Código | Constante | Descripción |
@@ -361,6 +435,14 @@ con un código distinto de cero siempre se informa como `ApiException`, nunca co
 | 30 | `AML_CHECK_NOT_FOUND` | Verificación AML no encontrada |
 | 35 | `SERVICE_NOT_AVAILABLE` | Servicio no disponible |
 | 50 | `INVALID_BANDWIDTH_AMOUNT` | Cantidad de ancho de banda inválida |
+| 90 | `BULK_NOT_FOUND` | Pedido masivo no encontrado |
+| 91 | `BULK_EXPIRED` | El cálculo expiró, calcule de nuevo |
+| 92 | `BULK_PRICE_CHANGED` | El precio cambió; el nuevo cálculo está en `BulkPriceChangedException` |
+| 93 | `BULK_TOO_MANY_ITEMS` | Más de 10 000 filas |
+| 94 | `BULK_NO_VALID_ITEMS` | No hay filas válidas; están en `BulkNoValidItemsException` |
+| 95 | `BULK_RESOURCE_NOT_SUPPORTED` | Solo se puede pedir energía de forma masiva |
+| 96 | `PAYLOAD_TOO_LARGE` | Cuerpo de la solicitud demasiado grande (HTTP 413) |
+| 429 | `RATE_LIMITED` | Demasiadas solicitudes; espere `getRetryAfter()` si se indica |
 | 500 | `INTERNAL_SERVER_ERROR` | Error interno del servidor: contacta con soporte |
 
 Las constantes son valores del enum `ApiErrorCode`. Un código que esta versión del

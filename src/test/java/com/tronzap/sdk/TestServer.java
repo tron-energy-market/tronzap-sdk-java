@@ -74,8 +74,13 @@ final class TestServer implements AutoCloseable {
     }
 
     static void write(HttpExchange exchange, int status, String body) throws IOException {
+        write(exchange, status, body, Map.of());
+    }
+
+    static void write(HttpExchange exchange, int status, String body, Map<String, String> headers) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
+        headers.forEach((name, value) -> exchange.getResponseHeaders().set(name, value));
         exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(bytes);
@@ -96,6 +101,11 @@ final class TestServer implements AutoCloseable {
 
     TestServer reply(int status, String body) {
         handler = (exchange, request) -> write(exchange, status, body);
+        return this;
+    }
+
+    TestServer reply(int status, String body, Map<String, String> headers) {
+        handler = (exchange, request) -> write(exchange, status, body, headers);
         return this;
     }
 

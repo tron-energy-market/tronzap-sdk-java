@@ -165,6 +165,11 @@ request, including a response body that arrives slowly.
 | `checkSubscription(request)` | `/v1/subscription/check` | Status of a subscription, by id or external id |
 | `stopSubscription(request)` | `/v1/subscription/stop` | Stop a subscription |
 | `getSubscriptionHistory()` / `getSubscriptionHistory(request)` | `/v1/subscriptions/history` | Paginated subscription history |
+| `bulkCalculate(request)` | `/v1/bulk/calculate` | Validate and price up to 10 000 rows of a bulk energy order |
+| `bulkCreate(request)` | `/v1/bulk/create` | Start a bulk order from a calculation |
+| `bulkCheck(request)` | `/v1/bulk/check` | Status and progress of a bulk order, by id or external id |
+| `getBulkHistory()` / `getBulkHistory(request)` | `/v1/bulk/history` | Paginated bulk order history |
+| `bulkReport(request)` | `/v1/bulk/report` | Per-address report of a bulk order as CSV |
 
 Parameters live in immutable request records in `com.tronzap.sdk.request`. Each
 has an `of(...)` factory for the required values, and the ones with several
@@ -281,6 +286,57 @@ returns the usage counters `transactionsUsed()`, `energyUsed()` and `totalPrice(
 instead, and an empty `params()`. A subscription with a transactions limit cannot
 be stopped (`CANNOT_STOP_SUBSCRIPTION`).
 
+### Bulk orders
+
+Buy energy for up to 10 000 addresses in one order. `bulkCalculate` validates and
+prices the rows and returns a calculation valid for 10 minutes; nothing is charged.
+Invalid rows do not fail the request: they come back in `rejected()` with their row
+number. `bulkCreate` starts the order; each address is charged when it is
+processed, and addresses that are not activated are skipped without a charge.
+
+If the price changed since the calculation, `bulkCreate` does not start the order
+and throws `BulkPriceChangedException` (code `BULK_PRICE_CHANGED`). Its
+`getCalculation()` is the new calculation: confirm the new total, then start it by
+its `id()`.
+
+```java
+BulkCalculation calculation = client.bulkCalculate(BulkCalculateRequest.of(List.of(
+        BulkItem.of("TRecipientAddress1", 65000),
+        BulkItem.of("TRecipientAddress2", 131000))));
+calculation.rejected().forEach(row -> System.out.println(row.row() + " " + row.reason()));
+
+BulkOrder order;
+try {
+    order = client.bulkCreate(BulkCreateRequest.builder(calculation.id())
+            .externalId("order-42")
+            .webhookUrl("https://example.com/tronzap/bulk")
+            .build());
+} catch (BulkPriceChangedException e) {
+    BulkCalculation newCalculation = e.getCalculation(); // confirm the new total, then start it
+    order = client.bulkCreate(BulkCreateRequest.builder(newCalculation.id()).externalId("order-42").build());
+}
+
+order = client.bulkCheck(BulkOrderRequest.byExternalId("order-42")); // poll until COMPLETED, PARTIAL or FAILED
+String csv = client.bulkReport(BulkReportRequest.byId(order.id()));  // row,address,amount,status,reason,charged,transaction_id
+BulkHistory history = client.getBulkHistory(BulkHistoryRequest.of(1, 10));
+```
+
+With `webhookUrl`, the API sends one `POST` to it when the order becomes final.
+Check its `X-Signature` header against the raw body before trusting it, for
+example in Spring:
+
+```java
+@PostMapping("/tronzap/bulk")
+ResponseEntity<Void> bulkWebhook(@RequestBody byte[] body,
+                                 @RequestHeader(value = "X-Signature", required = false) String signature) {
+    if (!client.verifyWebhookSignature(body, signature)) {
+        return ResponseEntity.status(401).build();
+    }
+    // {"id":"01kb2m5x9qj4v8n3c7d6e5f4g3","external_id":"order-42","status":"partial"}
+    return ResponseEntity.ok().build();
+}
+```
+
 ## Error handling
 
 Every failure of an API call is an unchecked `TronzapException`. Catch a subclass
@@ -289,8 +345,10 @@ to handle one kind of failure:
 ```
 TronzapException
 ├── ApiException                  — the API answered with a non-zero code
+│   ├── BulkPriceChangedException — code 92, with the new calculation
+│   └── BulkNoValidItemsException — code 94, with the rejected rows
 ├── HttpException                 — non-2xx response without an API payload
-│   ├── RateLimitException        — HTTP 429
+│   ├── RateLimitException        — HTTP 429 without an API payload
 │   ├── UnauthorizedException     — HTTP 401 or 403
 │   └── ServerException           — HTTP 5xx
 ├── InvalidResponseException      — 2xx response the SDK could not read
@@ -338,6 +396,23 @@ An API error takes precedence over the HTTP status: the API reports some failure
 with a 2xx status and others with a 4xx or 5xx status, so a readable payload with
 a non-zero code is always reported as `ApiException`, never as `HttpException`.
 
+`ApiException.getResult()` is the `result` the API sent along with the error, as
+JSON text. The SDK reads the data of `BULK_PRICE_CHANGED` and `BULK_NO_VALID_ITEMS`
+into `BulkPriceChangedException.getCalculation()` and
+`BulkNoValidItemsException.getRejected()`. A rate limit reported by the API is an
+`ApiException` with `RATE_LIMITED`; `RateLimitException` is only an HTTP 429
+without an API payload, such as one from a proxy. Both, like the other
+`HttpException`s, carry `getRetryAfter()`, empty when the server did not say how
+long to wait:
+
+```java
+} catch (ApiException e) {
+    if (e.getErrorCode() == ApiErrorCode.RATE_LIMITED) {
+        Thread.sleep(e.getRetryAfter().orElse(Duration.ofMinutes(1)).toMillis());
+    }
+}
+```
+
 ### API error codes
 
 | Code | Constant | Description |
@@ -356,6 +431,14 @@ a non-zero code is always reported as `ApiException`, never as `HttpException`.
 | 30 | `AML_CHECK_NOT_FOUND` | AML check not found |
 | 35 | `SERVICE_NOT_AVAILABLE` | Service not available |
 | 50 | `INVALID_BANDWIDTH_AMOUNT` | Invalid bandwidth amount |
+| 90 | `BULK_NOT_FOUND` | Bulk order not found |
+| 91 | `BULK_EXPIRED` | The calculation expired, calculate again |
+| 92 | `BULK_PRICE_CHANGED` | The price changed; the new calculation is in `BulkPriceChangedException` |
+| 93 | `BULK_TOO_MANY_ITEMS` | More than 10 000 rows |
+| 94 | `BULK_NO_VALID_ITEMS` | No valid rows; they are in `BulkNoValidItemsException` |
+| 95 | `BULK_RESOURCE_NOT_SUPPORTED` | Only energy can be ordered in bulk |
+| 96 | `PAYLOAD_TOO_LARGE` | Request body too large (HTTP 413) |
+| 429 | `RATE_LIMITED` | Too many requests; wait `getRetryAfter()` if given |
 | 500 | `INTERNAL_SERVER_ERROR` | Internal server error – contact support |
 
 The constants are values of the `ApiErrorCode` enum. A code this SDK version does
